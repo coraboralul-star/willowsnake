@@ -10,6 +10,7 @@ function context() {
 }
 
 export function playEat() {
+  if (typeof document !== "undefined" && document.hidden) return;
   const ac = context();
   if (!ac) return;
 
@@ -34,6 +35,7 @@ export function playEat() {
 }
 
 export function playBonk() {
+  if (typeof document !== "undefined" && document.hidden) return;
   const ac = context();
   if (!ac) return;
 

@@ -26,6 +26,7 @@ import {
   toggleKeySounds,
   type GameKey,
 } from "@/lib/keyboardSounds";
+import { isPageVisible } from "@/lib/pageVisible";
 import { playBonk, playEat } from "@/lib/sfx";
 
 export type GameUi = {
@@ -208,6 +209,10 @@ export function useSnakeGame(
       playing.tickStartedAt = now;
     }
 
+    const lag = now - playing.tickStartedAt;
+    const cap = playing.tickMs * 1500;
+    if (lag > cap) playing.tickStartedAt = now - cap;
+
     let advanced = false;
     while (now - liveRef.current.tickStartedAt >= liveRef.current.tickMs) {
       let current = liveRef.current;
@@ -215,7 +220,7 @@ export function useSnakeGame(
         const facing = current.queued.at(0) ?? current.direction;
         const dir = pickAutoplayDir(current);
         current = applyAutoplayDir(current, dir);
-        if (dir !== facing) {
+        if (dir !== facing && isPageVisible()) {
           tapKey(DIR_TO_KEY[dir], (key) => setHeldKey(key));
         }
       }

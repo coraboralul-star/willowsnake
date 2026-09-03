@@ -28,14 +28,27 @@ export function isAutoplay() {
   return autoplayOn;
 }
 
+function resetHunt() {
+  activeChase = null;
+}
+
+function hasEscape(state: GameState) {
+  const moves = legalMoves(state, state.queued.at(-1) ?? state.direction);
+  for (const move of moves) {
+    const next = peek(state, move.dir);
+    if (next && legalMoves(next, next.direction).length > 0) return true;
+  }
+  return false;
+}
+
 export function enableAutoplay() {
   autoplayOn = true;
-  activeChase = null;
+  resetHunt();
 }
 
 export function autoplayOnNewRun(tickMs = 120) {
   if (!autoplayOn) return;
-  activeChase = null;
+  resetHunt();
   roamHeading = null;
   roamTicksLeft = Math.max(3, Math.round((300 + Math.random() * 200) / tickMs));
 }
@@ -165,6 +178,132 @@ function bfsPath(start: Point, goal: Point, blocked: Set<string>, n: number): Po
     }
   }
 
+  return null;
+}
+
+function bodyBlocks(body: Point[], p: Point, arriveAt: number) {
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i].x === p.x && body[i].y === p.y && arriveAt < body.length - i) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function timedBfsPath(state: GameState): Point[] | null {
+  const n = state.gridSize;
+  const start = state.snake[0];
+  const goal = state.food;
+  if (goal.x < 0 || goal.y < 0) return null;
+  if (start.x === goal.x && start.y === goal.y) return [];
+
+  const seen = new Set<string>([key(start)]);
+  const queue: Point[] = [start];
+  const prev = new Map<string, string>();
+  const dist = new Map<string, number>([[key(start), 0]]);
+
+  while (queue.length) {
+    const cur = queue.shift();
+    if (!cur) break;
+    const t = dist.get(key(cur)) ?? 0;
+    for (const dir of orderedDirs(cur, goal)) {
+      const nxt = add(cur, dir);
+      if (!inBounds(nxt, n)) continue;
+      const id = key(nxt);
+      if (seen.has(id)) continue;
+      const isGoal = nxt.x === goal.x && nxt.y === goal.y;
+      if (!isGoal && bodyBlocks(state.snake, nxt, t + 1)) continue;
+      seen.add(id);
+      prev.set(id, key(cur));
+      dist.set(id, t + 1);
+      if (isGoal) {
+        const path: Point[] = [nxt];
+        let step = id;
+        while (prev.get(step) && prev.get(step) !== key(start)) {
+          step = prev.get(step) as string;
+          const [x, y] = step.split(",").map(Number);
+          path.push({ x, y });
+        }
+        path.reverse();
+        return path;
+      }
+      queue.push(nxt);
+    }
+  }
+
+  return null;
+}
+
+function pathFirstStep(state: GameState, path: Point[] | null, fill: number): Direction | null {
+  if (!path || path.length === 0) return null;
+  const facing = state.queued.at(-1) ?? state.direction;
+  const need = fill < 0.12 ? 0.86 : 0.93;
+
+  let g: GameState | null = state;
+  for (const cell of path) {
+    if (!g) return null;
+    const dir = dirBetween(g.snake[0], cell);
+    if (!dir || dir === OPPOSITE[g.direction]) return null;
+    g = peek(g, dir);
+    if (!g || !hasEscape(g) || !spaceOk(g, need)) return null;
+  }
+  if (!g || !chaseSafe(g, fill)) return null;
+
+  const first = dirBetween(state.snake[0], path[0]);
+  if (!first || first === OPPOSITE[facing]) return null;
+  return first;
+}
+
+function areaAfter(state: GameState, dir: Direction) {
+  const next = peek(state, dir);
+  if (!next) return -1;
+  const blocked = new Set(next.snake.slice(0, -1).map(key));
+  return flood(next.snake[0], blocked, next.gridSize);
+}
+
+function pickFastestSafe(state: GameState, moves: Move[], fill: number): Direction | null {
+  let maxArea = 0;
+  for (const move of moves) {
+    maxArea = Math.max(maxArea, areaAfter(state, move.dir));
+  }
+  const minArea = Math.max(4, Math.floor(maxArea * 0.72));
+
+  const roomy = (dir: Direction) => {
+    const area = areaAfter(state, dir);
+    return area >= minArea;
+  };
+
+  const path =
+    timedBfsPath(state) ??
+    bfsPath(state.snake[0], state.food, occupiedAfter(state), state.gridSize);
+  const first = pathFirstStep(state, path, fill);
+  if (first && moves.some((move) => move.dir === first) && roomy(first)) {
+    activeChase = { x: state.food.x, y: state.food.y };
+    return first;
+  }
+
+  let best: Direction | null = null;
+  let bestLen = Infinity;
+  for (const move of moves) {
+    if (!roomy(move.dir)) continue;
+    const next = peek(state, move.dir);
+    if (!next || !hasEscape(next) || !chaseSafe(next, fill)) continue;
+    if (move.next.x === state.food.x && move.next.y === state.food.y) {
+      activeChase = { x: state.food.x, y: state.food.y };
+      return move.dir;
+    }
+    const rest = timedBfsPath(next);
+    if (!rest) continue;
+    if (pathFirstStep(next, rest, fill) == null) continue;
+    if (rest.length < bestLen) {
+      bestLen = rest.length;
+      best = move.dir;
+    }
+  }
+  if (best) {
+    activeChase = { x: state.food.x, y: state.food.y };
+    return best;
+  }
   return null;
 }
 
@@ -300,13 +439,24 @@ function canReach(start: Point, goal: Point, blocked: Set<string>, n: number) {
   return false;
 }
 
-function spaceOk(state: GameState) {
+function spaceOk(state: GameState, need = 0.9) {
   const n = state.gridSize;
   const tail = state.snake[state.snake.length - 1];
   const blocked = new Set(state.snake.slice(0, -1).map(key));
   const empty = n * n - (state.snake.length - 1);
   const area = flood(state.snake[0], blocked, n);
-  return canReach(state.snake[0], tail, blocked, n) && area >= Math.floor(empty * 0.9);
+  return canReach(state.snake[0], tail, blocked, n) && area >= Math.floor(empty * need);
+}
+
+function isYoung(state: GameState) {
+  const fill = state.snake.length / (state.gridSize * state.gridSize);
+  return state.snake.length <= 20 && fill < 0.2;
+}
+
+function chaseSafe(after: GameState, fill: number) {
+  if (!hasEscape(after)) return false;
+  if (isYoung(after) || fill < 0.12) return spaceOk(after, 0.9);
+  return spaceOk(after, 0.94) && cycleSafe(after);
 }
 
 function snakeOnArc(state: GameState, cycle: Cycle) {
@@ -317,53 +467,6 @@ function snakeOnArc(state: GameState, cycle: Cycle) {
     if (cycle.index[p.y][p.x] !== expected) return false;
   }
   return true;
-}
-
-function chaseFirstStep(state: GameState, foodAhead: number, cycle: Cycle): Direction | null {
-  const n = state.gridSize;
-  const fill = state.snake.length / (n * n);
-  if (state.score === 0 && state.snake.length <= 4) activeChase = null;
-
-  const sameFood =
-    activeChase != null &&
-    activeChase.x === state.food.x &&
-    activeChase.y === state.food.y;
-  if (!sameFood) activeChase = null;
-
-  const onArc = snakeOnArc(state, cycle);
-  const canStart = state.snake.length <= 8 || (onArc && fill < 0.52);
-  if (!activeChase && !canStart) return null;
-
-  const facing = state.queued.at(-1) ?? state.direction;
-  const path = bfsPath(state.snake[0], state.food, occupiedAfter(state), n);
-  if (!path || path.length === 0 || path.length > foodAhead) {
-    activeChase = null;
-    return null;
-  }
-
-  let g: GameState | null = state;
-  for (const cell of path) {
-    if (!g) return null;
-    const dir = dirBetween(g.snake[0], cell);
-    if (!dir || dir === OPPOSITE[g.direction]) {
-      activeChase = null;
-      return null;
-    }
-    g = peek(g, dir);
-  }
-  if (!g || !cycleSafe(g) || !spaceOk(g)) {
-    activeChase = null;
-    return null;
-  }
-
-  const first = dirBetween(state.snake[0], path[0]);
-  if (!first || first === OPPOSITE[facing]) {
-    activeChase = null;
-    return null;
-  }
-
-  activeChase = { x: state.food.x, y: state.food.y };
-  return first;
 }
 
 function scoreMove(state: GameState, move: Move, facing: Direction, cycle: Cycle) {
@@ -448,13 +551,36 @@ export function pickAutoplayDir(state: GameState): Direction {
   );
   const progress = ranked.filter((move) => isProgress(state, move, cycle, foodAhead));
 
-  const chase = chaseFirstStep(state, foodAhead, cycle);
-  if (chase && moves.some((move) => move.dir === chase)) return chase;
+  const fill = state.snake.length / (state.gridSize * state.gridSize);
+  const onArc = snakeOnArc(state, cycle);
+  const followPeek = followMove ? peek(state, followMove.dir) : null;
+  const followOk =
+    followPeek != null && hasEscape(followPeek) && cycleSafe(followPeek);
+  const young = isYoung(state);
 
-  const tryMove = (move: Move | undefined) => {
+  if (young || onArc || activeChase) {
+    const hunt = pickFastestSafe(state, moves, fill);
+    if (hunt) {
+      if (young) return hunt;
+      const pathLen = timedBfsPath(state)?.length ?? Number.POSITIVE_INFINITY;
+      if (pathLen <= foodAhead) return hunt;
+    } else {
+      activeChase = null;
+    }
+  }
+
+  if (followOk && followMove) return followMove.dir;
+
+  const tryMove = (move: Move | undefined, loose = false) => {
     if (!move) return null;
     const next = peek(state, move.dir);
-    if (next && cycleSafe(next)) return move.dir;
+    if (!next || !hasEscape(next)) return null;
+    if (loose) return spaceOk(next, 0.8) ? move.dir : null;
+    if (fill < 0.46) {
+      if (chaseSafe(next, fill)) return move.dir;
+      return null;
+    }
+    if (cycleSafe(next) && spaceOk(next, 0.94)) return move.dir;
     return null;
   };
 
@@ -471,7 +597,30 @@ export function pickAutoplayDir(state: GameState): Direction {
     if (dir) return dir;
   }
 
-  return followMove?.dir ?? facing;
+  for (const move of ranked) {
+    const dir = tryMove(move, true);
+    if (dir) return dir;
+  }
+
+  let bestArea = -1;
+  let bestDir: Direction | null = null;
+  for (const move of moves) {
+    const next = peek(state, move.dir);
+    if (!next || !hasEscape(next) || !spaceOk(next, 0.8)) continue;
+    const blocked = new Set(next.snake.slice(0, -1).map(key));
+    const area = flood(next.snake[0], blocked, next.gridSize);
+    if (area > bestArea) {
+      bestArea = area;
+      bestDir = move.dir;
+    }
+  }
+  if (bestDir) return bestDir;
+
+  for (const move of moves) {
+    if (peek(state, move.dir)) return move.dir;
+  }
+
+  return facing;
 }
 
 export function applyAutoplayDir(state: GameState, dir: Direction): GameState {

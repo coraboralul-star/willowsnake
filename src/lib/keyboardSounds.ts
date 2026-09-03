@@ -104,6 +104,7 @@ export function preloadKeySounds() {
 
 export function playKeyDown(gameKey: GameKey) {
   if (!enabled) return;
+  if (typeof document !== "undefined" && document.hidden) return;
   if (down.has(gameKey)) return;
   down.add(gameKey);
 
@@ -127,5 +128,6 @@ export function playKeyUp(gameKey: GameKey) {
   const sample = held.get(gameKey);
   held.delete(gameKey);
   if (!enabled || !sample) return;
+  if (typeof document !== "undefined" && document.hidden) return;
   playSlice(definitions[sample]?.timing[1] ?? definitions[sample]?.timing[0]);
 }

@@ -8,6 +8,7 @@ import {
   type GameState,
   type Point,
 } from "@/lib/engine";
+import { isPageVisible, onPageVisibility } from "@/lib/pageVisible";
 
 type GameBoardProps = {
   liveRef: RefObject<GameState>;
@@ -65,6 +66,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     if (!ctx) return;
 
     let frame = 0;
+    let ticker = 0;
     let width = 0;
     let lastAte = 0;
     let lastTs = performance.now();
@@ -91,6 +93,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     resize();
 
     const draw = (now: number) => {
+      if (!isPageVisible()) return;
       advanceRef.current(now);
 
       const state = liveRef.current;
@@ -125,11 +128,30 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       frame = requestAnimationFrame(draw);
     };
 
-    frame = requestAnimationFrame(draw);
+    const syncLoop = (visible = isPageVisible()) => {
+      cancelAnimationFrame(frame);
+      window.clearInterval(ticker);
+      frame = 0;
+      ticker = 0;
+      if (visible) {
+        lastTs = performance.now();
+        lastAte = liveRef.current.ateAt;
+        frame = requestAnimationFrame(draw);
+        return;
+      }
+      ticker = window.setInterval(() => {
+        advanceRef.current(performance.now());
+      }, liveRef.current.tickMs || 120);
+    };
+
+    const stopWatching = onPageVisibility(syncLoop);
+    syncLoop();
 
     return () => {
       observer.disconnect();
+      stopWatching();
       cancelAnimationFrame(frame);
+      window.clearInterval(ticker);
     };
   }, [liveRef]);
 
