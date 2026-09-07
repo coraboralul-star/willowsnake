@@ -290,43 +290,21 @@ function coil(w: number, h: number): Point[] | null {
   );
 }
 
-function foldVertical(w: number, h: number): Point[] | null {
-  if (w % 2 !== 0) return null;
-  const parts: Point[][] = [];
-  for (let x = 0; x < w; x += 2) parts.push(offset(stripCycle(2, h), x, 0));
-  return joinPath(parts, w, h);
-}
-
-function foldHorizontal(w: number, h: number): Point[] | null {
-  if (h % 2 !== 0) return null;
-  const parts: Point[][] = [];
-  for (let y = 0; y < h; y += 2) parts.push(offset(stripCycle(w, 2), 0, y));
-  return joinPath(parts, w, h);
-}
-
-function bandFill(w: number, h: number, band: number, axis: "x" | "y"): Point[] | null {
-  if (band < 2 || (axis === "x" ? w : h) < band) return null;
-  const parts: Point[][] = [];
-  if (axis === "x") {
-    for (let x = 0; x < w; ) {
-      const bw = Math.min(band, w - x);
-      if (!canCycle(bw, h)) return null;
-      const piece = bw === 2 ? stripCycle(bw, h) : coil(bw, h);
-      if (!piece) return null;
-      parts.push(offset(piece, x, 0));
-      x += bw;
+function tileCoils(w: number, h: number, tw: number, th: number): Point[] | null {
+  if (tw < 2 || th < 2 || w % tw !== 0 || h % th !== 0) return null;
+  const rows: Point[][] = [];
+  for (let y = 0; y < h; y += th) {
+    const row: Point[][] = [];
+    for (let x = 0; x < w; x += tw) {
+      const piece = Math.random() < 0.5 ? coil(tw, th) : reverseOrder(coil(tw, th) ?? []);
+      if (!piece || piece.length !== tw * th) return null;
+      row.push(offset(piece, x, y));
     }
-  } else {
-    for (let y = 0; y < h; ) {
-      const bh = Math.min(band, h - y);
-      if (!canCycle(w, bh)) return null;
-      const piece = bh === 2 ? stripCycle(w, bh) : coil(w, bh);
-      if (!piece) return null;
-      parts.push(offset(piece, 0, y));
-      y += bh;
-    }
+    const joined = joinPath(row, w, h);
+    if (!joined) return null;
+    rows.push(joined);
   }
-  return joinPath(parts, w, h);
+  return joinPath(rows, w, h);
 }
 
 function dress(order: Point[], w: number, h: number) {
@@ -340,24 +318,21 @@ function dress(order: Point[], w: number, h: number) {
 }
 
 function buildTight(w: number, h: number): Point[] | null {
-  const builders = [
-    () => foldVertical(w, h),
-    () => foldVertical(w, h),
-    () => foldHorizontal(w, h),
-    () => foldHorizontal(w, h),
-    () => bandFill(w, h, 4, "x"),
-    () => bandFill(w, h, 4, "y"),
+  const tiles: [number, number][] = [
+    [4, 4],
+    [4, 6],
+    [6, 4],
   ];
-  for (const builder of builders.sort(() => Math.random() - 0.5)) {
-    const order = builder();
+  for (const [tw, th] of tiles.sort(() => Math.random() - 0.5)) {
+    const order = tileCoils(w, h, tw, th);
     if (order && isBoardCycle(order, w, h)) return order;
   }
-  return foldVertical(w, h) ?? foldHorizontal(w, h);
+  return tileCoils(w, h, 4, 4) ?? tileCoils(w, h, 4, 6);
 }
 
 export function generateCycleNext(w: number, h = w): Point[][] {
   let order = buildTight(w, h);
-  if (!order || !isBoardCycle(order, w, h)) order = foldVertical(w, h) ?? foldHorizontal(w, h);
+  if (!order || !isBoardCycle(order, w, h)) order = tileCoils(w, h, 4, 4);
   if (order && isBoardCycle(order, w, h)) order = dress(order, w, h);
   if (!order || !isBoardCycle(order, w, h)) order = coil(w, h);
   if (!order || !isBoardCycle(order, w, h)) order = serpentine(w, h);

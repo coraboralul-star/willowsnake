@@ -3,6 +3,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import confetti from "canvas-confetti";
 import {
+  BASE_TICK,
   spinePath,
   type Direction,
   type Food,
@@ -10,6 +11,7 @@ import {
   type Point,
 } from "@/lib/engine";
 import { onLiveAlert } from "@/lib/gifts";
+import { isPageVisible, onPageVisibility } from "@/lib/pageVisible";
 import { resumeAudio } from "@/lib/sfx";
 
 type GameBoardProps = {
@@ -67,6 +69,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    let frame = 0;
     let ticker = 0;
     let width = 0;
     let height = 0;
@@ -129,15 +132,28 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       drawFx(ctx, particles, floaters, cell);
     };
 
-    const pulse = () => {
-      resumeAudio();
-      const now = performance.now();
-      advanceRef.current(now);
+    const draw = (now: number) => {
       paint(now);
+      frame = requestAnimationFrame(draw);
     };
 
-    ticker = window.setInterval(pulse, 50);
+    const syncLoop = (visible = isPageVisible()) => {
+      cancelAnimationFrame(frame);
+      window.clearInterval(ticker);
+      frame = 0;
+      ticker = 0;
+      lastTs = performance.now();
+      lastAte = liveRef.current.ateAt;
+      ticker = window.setInterval(() => {
+        advanceRef.current(performance.now());
+      }, liveRef.current.tickMs || BASE_TICK);
+      if (visible) {
+        resumeAudio();
+        frame = requestAnimationFrame(draw);
+      }
+    };
 
+    const stopWatching = onPageVisibility(syncLoop);
     const stopAlerts = onLiveAlert((alert) => {
       const rect = canvas.getBoundingClientRect();
       const palette =
@@ -161,13 +177,13 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         });
       }
     });
-    lastTs = performance.now();
-    lastAte = liveRef.current.ateAt;
-    pulse();
+    syncLoop();
 
     return () => {
       observer.disconnect();
+      stopWatching();
       stopAlerts();
+      cancelAnimationFrame(frame);
       window.clearInterval(ticker);
     };
   }, [liveRef]);

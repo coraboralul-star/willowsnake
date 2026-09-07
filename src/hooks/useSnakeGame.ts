@@ -211,7 +211,7 @@ export function useSnakeGame(
     const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
     while (
       now - liveRef.current.tickStartedAt >= liveRef.current.tickMs &&
-      steps < 16
+      steps < 8
     ) {
       steps += 1;
       let current = liveRef.current;

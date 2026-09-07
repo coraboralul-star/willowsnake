@@ -1,6 +1,14 @@
 "use client";
 
-import { DELTA, OPPOSITE, type Direction, type GameState, type Point } from "@/lib/engine";
+import {
+  DELTA,
+  OPPOSITE,
+  TILE_H,
+  TILE_W,
+  type Direction,
+  type GameState,
+  type Point,
+} from "@/lib/engine";
 
 let autoplayOn = false;
 
@@ -15,7 +23,6 @@ export function enableAutoplay() {
 export function autoplayOnNewRun(_tickMs = 114) {}
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
-const CLUSTER = 4;
 
 function dirBetween(from: Point, to: Point): Direction | null {
   const dx = to.x - from.x;
@@ -40,35 +47,27 @@ function willGrow(state: GameState, cell: Point) {
   return state.foods.some((food) => food.x === cell.x && food.y === cell.y);
 }
 
-function clusterFood(state: GameState, from: Point) {
+function tileKey(p: Point) {
+  return `${Math.floor(p.x / TILE_W)},${Math.floor(p.y / TILE_H)}`;
+}
+
+function hottestFood(state: GameState, from: Point) {
   if (state.foods.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const food of state.foods) {
+    const id = tileKey(food);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
   let best = state.foods[0];
   let bestCount = -1;
   let bestDist = Infinity;
   for (const food of state.foods) {
-    const count = state.foods.filter((other) => manhattan(food, other) <= CLUSTER).length;
+    const count = counts.get(tileKey(food)) ?? 0;
     const dist = manhattan(from, food);
     if (count > bestCount || (count === bestCount && dist < bestDist)) {
       best = food;
       bestCount = count;
       bestDist = dist;
-    }
-  }
-  return best;
-}
-
-function nearbyCleanFood(state: GameState, from: Point, headI: number, n: number) {
-  let best: Point | null = null;
-  let bestDist = Infinity;
-  for (const food of state.foods) {
-    const foodI = state.cycleIndex[food.y]?.[food.x];
-    if (foodI == null || foodI < 0) continue;
-    const along = fwd(headI, foodI, n);
-    const manh = manhattan(from, food);
-    if (manh > 3 || along === 0 || along > 8) continue;
-    if (manh < bestDist) {
-      bestDist = manh;
-      best = food;
     }
   }
   return best;
@@ -83,25 +82,19 @@ export function pickAutoplayDir(state: GameState): Direction {
   if (!nxt) return facing;
 
   const n = state.cols * state.rows;
-  const fill = state.snake.length / n;
-  if (fill >= 0.62) return cycleDir;
+  if (state.snake.length / n >= 0.7) return cycleDir;
 
   const headI = state.cycleIndex[head.y]?.[head.x];
   const tailI = state.cycleIndex[tail.y]?.[tail.x];
   if (headI == null || tailI == null || headI < 0 || tailI < 0) return cycleDir;
 
-  const inCluster = state.foods.some((food) => manhattan(head, food) <= CLUSTER);
-  const target = inCluster
-    ? nearbyCleanFood(state, head, headI, n) ?? clusterFood(state, head)
-    : clusterFood(state, head);
+  const target = hottestFood(state, head);
   if (!target) return cycleDir;
-
   const targetI = state.cycleIndex[target.y]?.[target.x];
   if (targetI == null || targetI < 0) return cycleDir;
 
   const distApple = fwd(headI, targetI, n);
   const distTail = fwd(headI, tailI, n);
-  const maxJump = inCluster ? Math.min(distApple, 8) : distApple;
   let best: Direction | null = null;
   let bestLeft = Infinity;
 
@@ -119,7 +112,7 @@ export function pickAutoplayDir(state: GameState): Direction {
     const cellI = state.cycleIndex[cell.y]?.[cell.x];
     if (cellI == null || cellI < 0) continue;
     const distNext = fwd(headI, cellI, n);
-    if (distNext === 0 || distNext > maxJump) continue;
+    if (distNext === 0 || distNext > distApple) continue;
     if (growing ? distNext >= distTail : distNext > distTail) continue;
 
     const left = fwd(cellI, targetI, n);

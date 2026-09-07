@@ -3,8 +3,10 @@ import { cycleIndex, cyclePrev, generateCycleNext } from "@/lib/hamilton";
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
 export type GameStatus = "idle" | "playing" | "paused" | "over" | "won";
-export const BOARD_COLS = 20;
-export const BOARD_ROWS = 26;
+export const BOARD_COLS = 16;
+export const BOARD_ROWS = 24;
+export const TILE_W = 4;
+export const TILE_H = 4;
 
 export const KEY_TO_DIR: Record<string, Direction> = {
   w: "up",
