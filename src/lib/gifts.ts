@@ -3,12 +3,10 @@
 export type LiveGift = {
   id: string;
   user: string;
-  name: string;
-  repeat?: number;
-  diamonds?: number;
+  coins: number;
 };
 
-export type GiftTone = "rose" | "rain" | "golden" | "nitro" | "hearts" | "slow" | "disco" | "party" | "cheer" | "lucky";
+export type GiftTone = "rose" | "rain" | "nitro" | "golden";
 
 export type GiftAction = {
   apples: number;
@@ -29,20 +27,7 @@ export type LiveAlert = {
   tone: GiftTone;
 };
 
-export const TEST_GIFTS: { name: string; label: string }[] = [
-  { name: "Rose", label: "Rose" },
-  { name: "Bouquet", label: "Apple rain" },
-  { name: "Golden", label: "Golden" },
-  { name: "Nitro", label: "Nitro" },
-  { name: "Hearts", label: "Hearts" },
-  { name: "Slow", label: "Slow-mo" },
-  { name: "Disco", label: "Disco" },
-  { name: "Party", label: "Party" },
-  { name: "Cheer", label: "Cheer" },
-  { name: "Lucky", label: "Lucky" },
-];
-
-const LUCKY_NAMES = ["Rose", "Golden", "Nitro", "Hearts", "Slow", "Disco", "Party"] as const;
+export const TEST_COINS = [1, 10, 50, 100] as const;
 
 type GiftHandler = (gift: LiveGift) => void;
 type AlertHandler = (alert: LiveAlert) => void;
@@ -77,12 +62,11 @@ export function isGiftTestMode() {
   return new URLSearchParams(window.location.search).has("gifts");
 }
 
-export function testGift(name: string, user = "Test gifter") {
+export function testCoins(coins: number, user = "Test gifter") {
   emitLiveGift({
-    id: `test-${name}-${Date.now()}`,
+    id: `test-${coins}-${Date.now()}`,
     user,
-    name,
-    repeat: 1,
+    coins,
   });
 }
 
@@ -101,88 +85,37 @@ function snack(label: string, tone: GiftTone, extra: Partial<GiftAction> = {}): 
   };
 }
 
+function coinLabel(coins: number) {
+  return coins === 1 ? "1 coin" : `${coins} coins`;
+}
+
 export function resolveGift(gift: LiveGift): GiftAction {
-  const name = gift.name.toLowerCase();
-  const n = Math.max(1, gift.repeat ?? 1);
-  const diamonds = gift.diamonds ?? 0;
+  const coins = Math.max(0, gift.coins);
+  const label = coinLabel(coins);
 
-  if (name.includes("lucky") || name.includes("mystery") || name.includes("box")) {
-    const pick = LUCKY_NAMES[Math.floor(Math.random() * LUCKY_NAMES.length)];
-    const action = resolveGift({ ...gift, name: pick });
-    return { ...action, label: `Lucky · ${action.label}`, tone: "lucky" };
-  }
-
-  if (
-    name.includes("gold") ||
-    name.includes("universe") ||
-    name.includes("lion") ||
-    diamonds >= 100
-  ) {
-    return snack("Golden snack", "golden", {
+  if (coins >= 100) {
+    return snack(label, "golden", {
       golden: 1,
       glowMs: 7000,
       confetti: true,
     });
   }
-
-  if (name.includes("nitro") || name.includes("gg") || name.includes("speed")) {
-    return snack("Nitro", "nitro", {
+  if (coins >= 50) {
+    return snack(label, "nitro", {
       apples: 1,
       nitroMs: 8000,
       glowMs: 8000,
     });
   }
-
-  if (name.includes("heart") || name.includes("love") || name.includes("kiss")) {
-    return snack("Heart rain", "hearts", {
-      hearts: 3,
-      glowMs: 6000,
-      confetti: true,
-    });
-  }
-
-  if (name.includes("slow") || name.includes("chill") || name.includes("turtle")) {
-    return snack("Slow-mo", "slow", {
-      apples: 1,
-      slowMs: 8000,
-      glowMs: 8000,
-    });
-  }
-
-  if (name.includes("disco") || name.includes("rainbow") || name.includes("star")) {
-    return snack("Disco", "disco", {
-      apples: 1,
-      glowMs: 12000,
-      confetti: true,
-    });
-  }
-
-  if (name.includes("party") || name.includes("firework") || name.includes("confetti")) {
-    return snack("Party", "party", {
-      apples: 5,
-      hearts: 2,
-      glowMs: 5000,
-      confetti: true,
-    });
-  }
-
-  if (name.includes("cheer") || name.includes("clap") || name.includes("wave")) {
-    return snack("Cheer", "cheer", {
-      glowMs: 1600,
-      confetti: true,
-    });
-  }
-
-  if (name.includes("bouquet") || name.includes("rosa") || n >= 5 || diamonds >= 10) {
-    return snack("Apple rain", "rain", {
-      apples: Math.min(12, 5 * n),
+  if (coins >= 10) {
+    return snack(label, "rain", {
+      apples: Math.min(12, Math.max(5, Math.floor(coins / 2))),
       glowMs: 2500,
       confetti: true,
     });
   }
-
-  return snack("Snack", "rose", {
-    apples: 1,
-    glowMs: 1800,
+  return snack(label, "rose", {
+    apples: coins > 0 ? 1 : 0,
+    glowMs: coins > 0 ? 1800 : 0,
   });
 }

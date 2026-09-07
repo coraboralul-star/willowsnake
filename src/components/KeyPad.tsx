@@ -19,6 +19,8 @@ const KEYS: { id: GameKey; dir: Direction; label: string; className: string }[] 
   { id: "d", dir: "right", label: "D", className: "col-start-3 row-start-2" },
 ];
 
+export const SIDE_RAIL_CLASS = "w-[168px] shrink-0";
+
 export function KeyPad({ heldKey, onSteer, onPause, onRetry, status }: KeyPadProps) {
   const retry = status === "over" || status === "won";
   const idle = status === "idle";
