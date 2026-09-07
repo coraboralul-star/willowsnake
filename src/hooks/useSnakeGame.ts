@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyAutoplayDir,
   autoplayOnNewRun,
-  DIR_TO_KEY,
   enableAutoplay,
   isAutoplay,
   pickAutoplayDir,
@@ -19,6 +18,7 @@ import {
   type GameState,
   type GameStatus,
 } from "@/lib/engine";
+import { createKeyActor } from "@/lib/keyActor";
 import {
   playKeyDown,
   playKeyUp,
@@ -55,13 +55,6 @@ function isTwo(event: KeyboardEvent) {
   return event.code === "Digit2" || event.code === "Numpad2" || event.key === "2";
 }
 
-function tapKey(gameKey: GameKey, onHeld?: (key: GameKey | null) => void) {
-  playKeyDown(gameKey);
-  onHeld?.(gameKey);
-  window.setTimeout(() => playKeyUp(gameKey), 52);
-  window.setTimeout(() => onHeld?.(null), 90);
-}
-
 export function useSnakeGame(
   gridSize: number,
   enabled = true,
@@ -76,6 +69,7 @@ export function useSnakeGame(
     twoHeld: false,
   });
   const retryRef = useRef<number | null>(null);
+  const keysRef = useRef<ReturnType<typeof createKeyActor> | null>(null);
   const [ui, setUi] = useState<GameUi>(() => ({
     score: 0,
     status: "idle",
@@ -133,6 +127,7 @@ export function useSnakeGame(
     applyComboToggle();
     liveRef.current = startRun(createGame(gridSize), performance.now());
     if (isAutoplay()) autoplayOnNewRun(liveRef.current.tickMs);
+    keysRef.current?.reset();
     beginRun();
     publish();
   }, [applyComboToggle, beginRun, gridSize, publish]);
@@ -145,8 +140,8 @@ export function useSnakeGame(
     const wait = 900 + Math.random() * 6100;
     retryRef.current = window.setTimeout(() => {
       retryRef.current = null;
-      tapKey("space");
       startRef.current();
+      keysRef.current?.tapSpace();
     }, wait);
   }, []);
 
@@ -214,14 +209,15 @@ export function useSnakeGame(
     if (lag > cap) playing.tickStartedAt = now - cap;
 
     let advanced = false;
+    const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
     while (now - liveRef.current.tickStartedAt >= liveRef.current.tickMs) {
       let current = liveRef.current;
       if (isAutoplay()) {
         const facing = current.queued.at(0) ?? current.direction;
         const dir = pickAutoplayDir(current);
         current = applyAutoplayDir(current, dir);
-        if (dir !== facing && isPageVisible()) {
-          tapKey(DIR_TO_KEY[dir], (key) => setHeldKey(key));
+        if (!burst && isPageVisible()) {
+          keysRef.current?.onMove(dir, dir !== facing);
         }
       }
 
@@ -235,10 +231,7 @@ export function useSnakeGame(
       if (next.status === "over" || next.status === "won") {
         if (next.status === "over") playBonk();
         comboRef.current.eligible =
-          !isAutoplay() &&
-          next.status === "over" &&
-          comboRef.current.pristine &&
-          next.snake[0].x === next.gridSize - 1;
+          !isAutoplay() && next.status === "over" && comboRef.current.pristine;
         setUi(toUi(next));
         onEndRef.current?.(next.score);
         if (isAutoplay()) queueAutoRetry();
@@ -257,6 +250,15 @@ export function useSnakeGame(
       );
     }
   }, [queueAutoRetry]);
+
+  useEffect(() => {
+    const actor = createKeyActor((key) => setHeldKey(key));
+    keysRef.current = actor;
+    return () => {
+      actor.dispose();
+      keysRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
