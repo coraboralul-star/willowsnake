@@ -1,4 +1,4 @@
-import { cyclePrev, generateCycleNext } from "@/lib/hamilton";
+import { cycleIndex, cyclePrev, generateCycleNext } from "@/lib/hamilton";
 
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
@@ -37,6 +37,7 @@ export type GameState = {
   queued: Direction[];
   foods: Point[];
   cycleNext: Point[][];
+  cycleIndex: number[][];
   score: number;
   status: GameStatus;
   tickStartedAt: number;
@@ -114,6 +115,7 @@ export function createGame(gridSize: number): GameState {
     queued: [],
     foods: spawnFoods(snake, [], gridSize),
     cycleNext,
+    cycleIndex: cycleIndex(cycleNext, gridSize),
     score: 0,
     status: "idle",
     tickStartedAt: 0,
