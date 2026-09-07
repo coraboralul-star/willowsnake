@@ -5,10 +5,13 @@ import confetti from "canvas-confetti";
 import {
   spinePath,
   type Direction,
+  type Food,
   type GameState,
   type Point,
 } from "@/lib/engine";
+import { onLiveAlert } from "@/lib/gifts";
 import { isPageVisible, onPageVisibility } from "@/lib/pageVisible";
+import { resumeAudio } from "@/lib/sfx";
 
 type GameBoardProps = {
   liveRef: RefObject<GameState>;
@@ -93,7 +96,6 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     resize();
 
     const draw = (now: number) => {
-      if (!isPageVisible()) return;
       advanceRef.current(now);
 
       const state = liveRef.current;
@@ -111,7 +113,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
 
       if (state.ateAt && state.ateAt !== lastAte) {
         lastAte = state.ateAt;
-        spawnBite(particles, floaters, state.snake[0], cell, canvas, state.score);
+        spawnBite(particles, floaters, state.snake[0], cell, canvas, state.score, state.pendingGrow);
       }
 
       ctx.clearRect(0, 0, width, width);
@@ -122,7 +124,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
 
       const points = spinePath(state.prevSnake, state.snake, progress);
       const facing = facingFrom(state.prevSnake[0], state.snake[0], state.direction);
-      drawSnake(ctx, points, cell, facing, now, state.ateAt);
+      drawSnake(ctx, points, cell, facing, now, state.ateAt, now < state.glowUntil);
       drawFx(ctx, particles, floaters, cell);
 
       frame = requestAnimationFrame(draw);
@@ -133,6 +135,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       window.clearInterval(ticker);
       frame = 0;
       ticker = 0;
+      resumeAudio();
       if (visible) {
         lastTs = performance.now();
         lastAte = liveRef.current.ateAt;
@@ -140,16 +143,41 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         return;
       }
       ticker = window.setInterval(() => {
+        resumeAudio();
         advanceRef.current(performance.now());
       }, liveRef.current.tickMs || 100);
     };
 
     const stopWatching = onPageVisibility(syncLoop);
+    const stopAlerts = onLiveAlert((alert) => {
+      const rect = canvas.getBoundingClientRect();
+      const palette =
+        alert.tone === "golden"
+          ? ["#F9A825", "#FFF8E7", "#FFD54F"]
+          : alert.tone === "hearts"
+            ? ["#F48FB1", "#E53935", "#FFF8E7"]
+            : alert.tone === "nitro"
+              ? ["#29B6F6", "#FFF8E7", "#43A047"]
+              : ["#E53935", "#43A047", "#F9A825", "#FFF8E7"];
+      confetti({
+        particleCount: alert.tone === "rose" ? 24 : 90,
+        spread: 72,
+        startVelocity: 32,
+        gravity: 0.85,
+        ticks: 180,
+        origin: {
+          x: (rect.left + rect.width / 2) / window.innerWidth,
+          y: (rect.top + rect.height * 0.35) / window.innerHeight,
+        },
+        colors: palette,
+      });
+    });
     syncLoop();
 
     return () => {
       observer.disconnect();
       stopWatching();
+      stopAlerts();
       cancelAnimationFrame(frame);
       window.clearInterval(ticker);
     };
@@ -211,7 +239,7 @@ function drawEatFlash(
 
 function drawFoods(
   ctx: CanvasRenderingContext2D,
-  foods: Point[],
+  foods: Food[],
   cell: number,
   now: number,
 ) {
@@ -222,7 +250,7 @@ function drawFoods(
 
 function drawFood(
   ctx: CanvasRenderingContext2D,
-  food: Point,
+  food: Food,
   cell: number,
   now: number,
 ) {
@@ -231,11 +259,12 @@ function drawFood(
   const x = food.x * cell + cell / 2;
   const y = food.y * cell + cell / 2;
 
-  ctx.fillStyle = COLORS.foodGlow;
+  ctx.fillStyle = food.kind === "golden" ? "rgba(249, 168, 37, 0.28)" : COLORS.foodGlow;
   ctx.beginPath();
   ctx.arc(x, y + cell * 0.04, cell * 0.28 * scale, 0, Math.PI * 2);
   ctx.fill();
-  drawApple(ctx, x, y, cell * 0.92 * scale);
+  if (food.kind === "heart") drawHeart(ctx, x, y, cell * 0.9 * scale);
+  else drawApple(ctx, x, y, cell * 0.92 * scale, food.kind === "golden");
 }
 
 function drawSnake(
@@ -245,12 +274,17 @@ function drawSnake(
   direction: Direction,
   now: number,
   ateAt: number,
+  glowing: boolean,
 ) {
   if (points.length === 0) return;
 
   const eat = ateAt ? Math.max(0, 1 - (now - ateAt) / 180) : 0;
   const thickness = cell * (0.62 + eat * 0.04);
   const radius = cell * 0.48;
+  const hue = (now / 12) % 360;
+  const dark = glowing ? `hsl(${hue}, 70%, 32%)` : COLORS.snakeDark;
+  const mid = glowing ? `hsl(${(hue + 40) % 360}, 72%, 48%)` : COLORS.snakeMid;
+  const lite = glowing ? `hsl(${(hue + 80) % 360}, 80%, 72%)` : COLORS.snakeLite;
 
   ctx.save();
   ctx.lineCap = "round";
@@ -261,13 +295,13 @@ function drawSnake(
   ctx.stroke();
   ctx.translate(0, -1.5);
   traceSpine(ctx, points, cell, radius);
-  ctx.strokeStyle = COLORS.snakeDark;
+  ctx.strokeStyle = dark;
   ctx.lineWidth = thickness;
   ctx.stroke();
-  ctx.strokeStyle = COLORS.snakeMid;
+  ctx.strokeStyle = mid;
   ctx.lineWidth = thickness * 0.78;
   ctx.stroke();
-  ctx.strokeStyle = COLORS.snakeLite;
+  ctx.strokeStyle = lite;
   ctx.lineWidth = thickness * 0.22;
   ctx.stroke();
   ctx.restore();
@@ -310,7 +344,7 @@ function traceSpine(
   ctx.lineTo(x(last), y(last));
 }
 
-function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, golden = false) {
   const s = size / 32;
   ctx.save();
   ctx.translate(x, y);
@@ -319,17 +353,17 @@ function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: nu
   ctx.beginPath();
   ctx.ellipse(0, 14, 10, 3, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = COLORS.foodDark;
+  ctx.fillStyle = golden ? "#F57F17" : COLORS.foodDark;
   ctx.beginPath();
   ctx.arc(-4.5, 2.2, 11, 0, Math.PI * 2);
   ctx.arc(4.5, 2.2, 11, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = COLORS.food;
+  ctx.fillStyle = golden ? "#FDD835" : COLORS.food;
   ctx.beginPath();
   ctx.arc(-4.5, 0.4, 10, 0, Math.PI * 2);
   ctx.arc(4.5, 0.4, 10, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#FFCDD2";
+  ctx.fillStyle = golden ? "#FFF8E1" : "#FFCDD2";
   ctx.beginPath();
   ctx.ellipse(-6.5, -4, 3.1, 4.2, -0.4, 0, Math.PI * 2);
   ctx.fill();
@@ -343,6 +377,34 @@ function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: nu
   ctx.fillStyle = "#7CB342";
   ctx.beginPath();
   ctx.ellipse(8, -14, 6.2, 3.1, 0.45, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHeart(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  const s = size / 28;
+  ctx.save();
+  ctx.translate(x, y + 1);
+  ctx.scale(s, s);
+  ctx.fillStyle = "rgba(42, 51, 36, 0.16)";
+  ctx.beginPath();
+  ctx.ellipse(0, 12, 9, 2.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#AD1457";
+  ctx.beginPath();
+  ctx.moveTo(0, 10);
+  ctx.bezierCurveTo(-16, 0, -10, -12, 0, -4);
+  ctx.bezierCurveTo(10, -12, 16, 0, 0, 10);
+  ctx.fill();
+  ctx.fillStyle = "#F48FB1";
+  ctx.beginPath();
+  ctx.moveTo(0, 8);
+  ctx.bezierCurveTo(-13, -1, -8, -10, 0, -2.4);
+  ctx.bezierCurveTo(8, -10, 13, -1, 0, 8);
+  ctx.fill();
+  ctx.fillStyle = "#FFEBEE";
+  ctx.beginPath();
+  ctx.ellipse(-4, -4, 2.2, 1.4, -0.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -410,10 +472,11 @@ function spawnBite(
   cell: number,
   canvas: HTMLCanvasElement,
   score: number,
+  pendingGrow: number,
 ) {
   const x = head.x * cell + cell / 2;
   const y = head.y * cell + cell / 2;
-  floaters.push({ x, y, life: 0, max: 520, text: "+1" });
+  floaters.push({ x, y, life: 0, max: 520, text: pendingGrow >= 2 ? "+3" : "+1" });
 
   for (let i = 0; i < 12; i += 1) {
     const angle = (Math.PI * 2 * i) / 12 + Math.random() * 0.4;

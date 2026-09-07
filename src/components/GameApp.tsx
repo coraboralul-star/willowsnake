@@ -1,14 +1,19 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { RotateCcw } from "lucide-react";
 import { GameBoard } from "@/components/GameBoard";
+import { GiftTestBar } from "@/components/GiftTestBar";
+import { GiftToasts } from "@/components/GiftToasts";
 import { KeyPad } from "@/components/KeyPad";
-import { PixelApple, SnakeMascot } from "@/components/SnakeMascot";
+import { PixelApple, PixelSkull, SnakeMascot } from "@/components/SnakeMascot";
 import { useHighScores } from "@/hooks/useHighScores";
+import { useSessionStats } from "@/hooks/useSessionStats";
 import { useSnakeGame } from "@/hooks/useSnakeGame";
 import { GRID_PRESETS, type GridId } from "@/lib/engine";
+import { isGiftTestMode } from "@/lib/gifts";
 
 type GameAppProps = {
   gridId: GridId;
@@ -19,18 +24,24 @@ type GameAppProps = {
 export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
   const preset = GRID_PRESETS.find((item) => item.id === gridId) ?? GRID_PRESETS[1];
   const { scores, record } = useHighScores();
+  const session = useSessionStats();
   const { liveRef, ui, heldKey, start, reset, togglePause, steer, advance } = useSnakeGame(
     preset.size,
     enabled,
     (score) => record(gridId, score),
   );
+  const [giftTest, setGiftTest] = useState(false);
   const best = scores[gridId] ?? 0;
   const liveBest = Math.max(best, ui.score);
   const isNewBest = ui.score > 0 && ui.score >= liveBest && ui.score > (best || 0);
   const overlay = ui.status === "over" || ui.status === "won" || ui.status === "paused";
 
+  useEffect(() => {
+    setGiftTest(isGiftTestMode());
+  }, []);
+
   return (
-    <div className="relative mx-auto flex w-full max-w-xl flex-col items-center gap-3">
+    <div className="relative mx-auto flex w-full max-w-5xl flex-col items-center gap-3">
       <header className="relative z-10 flex w-full flex-col items-center text-center">
         <SnakeMascot className="h-16 w-32 sm:h-20 sm:w-40" />
         <p className="mt-1 text-[0.7rem] font-extrabold uppercase tracking-[0.28em] text-ink-soft">
@@ -61,13 +72,22 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
             <p className="font-display text-xl leading-none text-sage-deep">{liveBest}</p>
           </div>
         </div>
-        <div className="flex flex-1 items-center justify-center rounded-xl bg-cream px-3 py-2 shadow-soft">
+        <div className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cream px-3 py-2 shadow-soft">
+          <PixelSkull className="h-8 w-8" />
           <div>
-            <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-ink-soft">Long</p>
-            <p className="font-display text-xl leading-none text-ink">{ui.length}</p>
+            <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-ink-soft">Deaths</p>
+            <p className="font-display text-xl leading-none text-ink">{session.deaths}</p>
           </div>
         </div>
       </div>
+
+      <p className="relative z-10 font-display text-sm text-ink">
+        {session.attempts} attempts
+        <span className="mx-2 text-ink-soft">·</span>
+        {session.wins} wins
+      </p>
+
+      {giftTest && <GiftTestBar />}
 
       <div className="relative z-10 flex flex-wrap justify-center gap-2">
         {GRID_PRESETS.map((item) => {
@@ -88,13 +108,23 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
         })}
       </div>
 
-      <section className="relative z-10 flex w-full flex-col items-center gap-3">
+      <section className="relative z-10 flex w-full flex-row items-center justify-center gap-3">
+        <div className="shrink-0">
+          <KeyPad
+            heldKey={heldKey}
+            onSteer={steer}
+            onPause={togglePause}
+            onRetry={start}
+            status={ui.status}
+          />
+        </div>
         <div
-          className={`board-frame relative w-full max-w-[min(100%,min(34rem,58dvh))] ${
+          className={`board-frame relative min-w-0 w-full max-w-[min(100%,min(32rem,56dvh))] ${
             ui.status === "over" ? "board-shake" : ""
           }`}
         >
           <GameBoard liveRef={liveRef} advance={advance} />
+          <GiftToasts />
           <AnimatePresence>
             {ui.status === "idle" && (
               <Overlay key="idle">
@@ -140,14 +170,6 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
             )}
           </AnimatePresence>
         </div>
-
-        <KeyPad
-          heldKey={heldKey}
-          onSteer={steer}
-          onPause={togglePause}
-          onRetry={start}
-          status={ui.status}
-        />
       </section>
     </div>
   );

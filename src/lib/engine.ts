@@ -29,13 +29,16 @@ export const KEY_TO_DIR: Record<string, Direction> = {
   D: "right",
 };
 
+export type FoodKind = "apple" | "golden" | "heart";
+export type Food = Point & { kind: FoodKind; from?: string };
+
 export type GameState = {
   gridSize: number;
   snake: Point[];
   prevSnake: Point[];
   direction: Direction;
   queued: Direction[];
-  foods: Point[];
+  foods: Food[];
   cycleNext: Point[][];
   cycleIndex: number[][];
   score: number;
@@ -45,6 +48,9 @@ export type GameState = {
   pauseT: number;
   ateAt: number;
   foodAt: number;
+  pendingGrow: number;
+  glowUntil: number;
+  nitroUntil: number;
 };
 
 export const DELTA: Record<Direction, Point> = {
@@ -62,7 +68,8 @@ export const OPPOSITE: Record<Direction, Direction> = {
 };
 
 export const BASE_TICK = 100;
-export const MIN_TICK = 100;
+export const MIN_TICK = 55;
+export const NITRO_TICK = 55;
 
 export function foodTarget(gridSize: number) {
   return 9 + (gridSize - 12);
@@ -123,6 +130,9 @@ export function createGame(gridSize: number): GameState {
     pauseT: 1,
     ateAt: 0,
     foodAt: 0,
+    pendingGrow: 0,
+    glowUntil: 0,
+    nitroUntil: 0,
   };
 }
 
@@ -161,14 +171,23 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
   }
 
-  const eating = state.foods.some((food) => food.x === nextHead.x && food.y === nextHead.y);
-  const body = eating ? state.snake : state.snake.slice(0, -1);
+  const eaten = state.foods.find((food) => food.x === nextHead.x && food.y === nextHead.y);
+  const eating = eaten != null;
+  const body = eating || state.pendingGrow > 0 ? state.snake : state.snake.slice(0, -1);
   if (body.some((p) => p.x === nextHead.x && p.y === nextHead.y)) {
     return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
   }
 
   const snake = [nextHead, ...state.snake];
-  if (!eating) snake.pop();
+  let pendingGrow = state.pendingGrow;
+  if (eating) {
+    const bonus = eaten.kind === "golden" ? 2 : 0;
+    pendingGrow += bonus;
+  } else if (pendingGrow > 0) {
+    pendingGrow -= 1;
+  } else {
+    snake.pop();
+  }
 
   const filled = snake.length >= state.gridSize * state.gridSize;
   const foods = eating
@@ -179,6 +198,8 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
       )
     : state.foods;
 
+  const tickMs = state.nitroUntil && now >= state.nitroUntil ? BASE_TICK : state.tickMs;
+
   return {
     ...state,
     prevSnake: clonePoints(state.snake),
@@ -186,8 +207,10 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     direction,
     queued,
     foods,
-    score: eating ? state.score + 1 : state.score,
-    tickMs: state.tickMs,
+    score: eating ? state.score + (eaten.kind === "golden" ? 3 : 1) : state.score,
+    tickMs,
+    pendingGrow,
+    nitroUntil: state.nitroUntil && now >= state.nitroUntil ? 0 : state.nitroUntil,
     status: filled ? "won" : state.status,
     ateAt: eating ? now : state.ateAt,
     foodAt: eating ? now : state.foodAt,
@@ -215,10 +238,10 @@ export function spinePath(prev: Point[], curr: Point[], t: number): Point[] {
   return ribbonPath(prev, curr, t);
 }
 
-export function spawnFoods(snake: Point[], foods: Point[], gridSize: number): Point[] {
+export function spawnFoods(snake: Point[], foods: Food[], gridSize: number): Food[] {
   const target = Math.min(foodTarget(gridSize), gridSize * gridSize - snake.length);
   const taken = new Set([...snake, ...foods].map(foodKey));
-  const result = foods.map((food) => ({ ...food }));
+  const result: Food[] = foods.map((food) => ({ ...food }));
 
   while (result.length < target) {
     const spaced: Point[] = [];
@@ -234,15 +257,76 @@ export function spawnFoods(snake: Point[], foods: Point[], gridSize: number): Po
     const pool = spaced.length > 0 ? spaced : any;
     if (pool.length === 0) break;
     const pick = pool[Math.floor(Math.random() * pool.length)];
-    result.push(pick);
+    result.push({ ...pick, kind: "apple" });
     taken.add(foodKey(pick));
   }
 
   return result;
 }
 
-export function spawnFood(snake: Point[], gridSize: number): Point {
-  return spawnFoods(snake, [], gridSize)[0] ?? snake[0];
+export function spawnFood(snake: Point[], gridSize: number): Food {
+  return spawnFoods(snake, [], gridSize)[0] ?? { ...snake[0], kind: "apple" };
+}
+
+type GiftDrop = {
+  apples: number;
+  golden: number;
+  hearts: number;
+  nitroMs: number;
+  glowMs: number;
+};
+
+function emptyCells(state: GameState) {
+  const taken = new Set([...state.snake, ...state.foods].map(foodKey));
+  const empty: Point[] = [];
+  for (let y = 0; y < state.gridSize; y += 1) {
+    for (let x = 0; x < state.gridSize; x += 1) {
+      if (!taken.has(`${x},${y}`)) empty.push({ x, y });
+    }
+  }
+  return empty;
+}
+
+function takeCells(state: GameState, count: number) {
+  const pool = emptyCells(state);
+  const picks: Point[] = [];
+  for (let i = 0; i < count && pool.length > 0; i += 1) {
+    const idx = Math.floor(Math.random() * pool.length);
+    picks.push(pool.splice(idx, 1)[0]);
+  }
+  return picks;
+}
+
+export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: string): GameState {
+  if (state.status !== "playing" && state.status !== "paused") return state;
+  let next: GameState = { ...state, foods: state.foods.map((food) => ({ ...food })) };
+  const add = (kind: FoodKind, count: number) => {
+    const cells = takeCells(next, count);
+    next = {
+      ...next,
+      foods: [
+        ...next.foods,
+        ...cells.map((cell) => ({ ...cell, kind, from })),
+      ],
+    };
+  };
+  add("apple", drop.apples);
+  add("golden", drop.golden);
+  add("heart", drop.hearts);
+  if (drop.nitroMs > 0) {
+    next = {
+      ...next,
+      tickMs: NITRO_TICK,
+      nitroUntil: Math.max(next.nitroUntil, now) + drop.nitroMs,
+    };
+  }
+  if (drop.glowMs > 0) {
+    next = {
+      ...next,
+      glowUntil: Math.max(next.glowUntil, now) + drop.glowMs,
+    };
+  }
+  return { ...next, foodAt: now };
 }
 
 function clonePoints(points: Point[]): Point[] {

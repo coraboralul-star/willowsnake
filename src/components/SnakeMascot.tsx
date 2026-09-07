@@ -63,3 +63,24 @@ export function PixelApple({ className = "" }: { className?: string }) {
     </svg>
   );
 }
+
+export function PixelSkull({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
+      <ellipse cx="16" cy="28" rx="8" ry="2.2" fill="#2a3324" opacity="0.16" />
+      <path
+        d="M8 14c0-6 3.6-10 8-10s8 4 8 10v6c0 1.2-.6 2-1.6 2h-1.2v2.4c0 .8-.6 1.4-1.4 1.4h-1.6c-.8 0-1.4-.6-1.4-1.4V22h-1.6v2.4c0 .8-.6 1.4-1.4 1.4h-1.6c-.8 0-1.4-.6-1.4-1.4V22H9.6C8.6 22 8 21.2 8 20v-6Z"
+        fill="#F4E7C8"
+        stroke="#3E3424"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <circle cx="12.4" cy="15.2" r="2.3" fill="#1A2A18" />
+      <circle cx="19.6" cy="15.2" r="2.3" fill="#1A2A18" />
+      <circle cx="11.7" cy="14.6" r="0.7" fill="#FFF8E7" />
+      <circle cx="18.9" cy="14.6" r="0.7" fill="#FFF8E7" />
+      <path d="M16 18.2 14.6 21h2.8L16 18.2Z" fill="#3E3424" />
+      <path d="M11.5 23.6h2.2M14.9 23.6h2.2M18.3 23.6h2.2" stroke="#3E3424" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}

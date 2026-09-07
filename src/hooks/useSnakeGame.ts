@@ -9,6 +9,7 @@ import {
   pickAutoplayDir,
 } from "@/lib/autoplay";
 import {
+  applyGift,
   createGame,
   enqueueTurn,
   KEY_TO_DIR,
@@ -18,6 +19,7 @@ import {
   type GameState,
   type GameStatus,
 } from "@/lib/engine";
+import { onLiveGift, pushLiveAlert, resolveGift } from "@/lib/gifts";
 import { createKeyActor } from "@/lib/keyActor";
 import {
   playKeyDown,
@@ -26,8 +28,8 @@ import {
   toggleKeySounds,
   type GameKey,
 } from "@/lib/keyboardSounds";
-import { isPageVisible } from "@/lib/pageVisible";
-import { playBonk, playEat } from "@/lib/sfx";
+import { bumpAttempt, bumpDeath, bumpWin } from "@/lib/sessionStats";
+import { playBonk, playEat, resumeAudio } from "@/lib/sfx";
 
 export type GameUi = {
   score: number;
@@ -71,7 +73,7 @@ export function useSnakeGame(
   const retryRef = useRef<number | null>(null);
   const keysRef = useRef<ReturnType<typeof createKeyActor> | null>(null);
   const [ui, setUi] = useState<GameUi>(() => ({
-    score: 0,
+    score: 3,
     status: "idle",
     length: 3,
     gridSize,
@@ -89,6 +91,7 @@ export function useSnakeGame(
   const beginRun = useCallback(() => {
     comboRef.current.pristine = true;
     comboRef.current.eligible = false;
+    bumpAttempt();
   }, []);
 
   const markDirty = useCallback(() => {
@@ -146,10 +149,10 @@ export function useSnakeGame(
   }, []);
 
   const togglePause = useCallback(() => {
-    if (isAutoplay()) return;
     const current = liveRef.current;
     if (current.status === "playing") {
-      markDirty();
+      if (!isAutoplay()) markDirty();
+      keysRef.current?.reset();
       const pauseT = Math.min(
         1,
         Math.max(0, (performance.now() - current.tickStartedAt) / current.tickMs),
@@ -159,7 +162,7 @@ export function useSnakeGame(
       return;
     }
     if (current.status === "paused") {
-      markDirty();
+      if (!isAutoplay()) markDirty();
       liveRef.current = {
         ...current,
         status: "playing",
@@ -188,15 +191,6 @@ export function useSnakeGame(
   );
 
   const advance = useCallback((now: number) => {
-    if (isAutoplay() && liveRef.current.status === "paused") {
-      const current = liveRef.current;
-      liveRef.current = {
-        ...current,
-        status: "playing",
-        tickStartedAt: now - current.pauseT * current.tickMs,
-      };
-    }
-
     const playing = liveRef.current;
     if (playing.status !== "playing") return;
 
@@ -205,8 +199,9 @@ export function useSnakeGame(
     }
 
     const lag = now - playing.tickStartedAt;
-    const cap = playing.tickMs * 1500;
-    if (lag > cap) playing.tickStartedAt = now - cap;
+    if (lag > playing.tickMs * 4) {
+      playing.tickStartedAt = now - playing.tickMs;
+    }
 
     let advanced = false;
     const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
@@ -216,9 +211,7 @@ export function useSnakeGame(
         const facing = current.queued.at(0) ?? current.direction;
         const dir = pickAutoplayDir(current);
         current = applyAutoplayDir(current, dir);
-        if (!burst && isPageVisible()) {
-          keysRef.current?.onMove(dir, dir !== facing);
-        }
+        if (!burst) keysRef.current?.onMove(dir, dir !== facing);
       }
 
       const next = step(current, now);
@@ -226,14 +219,18 @@ export function useSnakeGame(
       liveRef.current = next;
       advanced = true;
 
-      if (next.score > current.score) playEat();
+      if (!burst && next.score > current.score) playEat();
 
       if (next.status === "over" || next.status === "won") {
-        if (next.status === "over") playBonk();
+        if (next.status === "over") {
+          if (!burst) playBonk();
+          bumpDeath();
+        }
+        if (next.status === "won") bumpWin();
         comboRef.current.eligible =
           !isAutoplay() && next.status === "over" && comboRef.current.pristine;
         setUi(toUi(next));
-        onEndRef.current?.(next.score);
+        onEndRef.current?.(next.snake.length);
         if (isAutoplay()) queueAutoRetry();
         return;
       }
@@ -254,11 +251,26 @@ export function useSnakeGame(
   useEffect(() => {
     const actor = createKeyActor((key) => setHeldKey(key));
     keysRef.current = actor;
+    resumeAudio();
     return () => {
       actor.dispose();
       keysRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    return onLiveGift((gift) => {
+      const action = resolveGift(gift);
+      liveRef.current = applyGift(liveRef.current, action, performance.now(), gift.user);
+      pushLiveAlert({
+        id: gift.id,
+        user: gift.user,
+        label: action.label,
+        tone: action.tone,
+      });
+      publish();
+    });
+  }, [publish]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -346,7 +358,7 @@ export function useSnakeGame(
 
 function toUi(state: GameState): GameUi {
   return {
-    score: state.score,
+    score: state.snake.length,
     status: state.status,
     length: state.snake.length,
     gridSize: state.gridSize,

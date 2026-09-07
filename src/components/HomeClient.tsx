@@ -17,7 +17,7 @@ export function HomeClient() {
       <ArcadeBackdrop />
       <AnimatePresence>{!ready && <Loader key="loader" onDone={onDone} />}</AnimatePresence>
       <motion.div
-        className="relative z-10 mx-auto w-full max-w-xl"
+        className="relative z-10 mx-auto w-full max-w-5xl"
         initial={false}
         animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 10 }}
         transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}

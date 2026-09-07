@@ -1,16 +1,29 @@
 "use client";
 
 let audio: AudioContext | null = null;
+let keepAlive: OscillatorNode | null = null;
 
 function context() {
   if (typeof window === "undefined") return null;
   if (!audio) audio = new AudioContext();
   if (audio.state === "suspended") void audio.resume();
+  if (audio && !keepAlive) {
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    gain.gain.value = 0.00001;
+    osc.connect(gain);
+    gain.connect(audio.destination);
+    osc.start();
+    keepAlive = osc;
+  }
   return audio;
 }
 
+export function resumeAudio() {
+  context();
+}
+
 export function playEat() {
-  if (typeof document !== "undefined" && document.hidden) return;
   const ac = context();
   if (!ac) return;
 
@@ -35,7 +48,6 @@ export function playEat() {
 }
 
 export function playBonk() {
-  if (typeof document !== "undefined" && document.hidden) return;
   const ac = context();
   if (!ac) return;
 
