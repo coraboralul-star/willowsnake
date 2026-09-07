@@ -26,8 +26,12 @@ function dirBetween(from: Point, to: Point): Direction | null {
   return null;
 }
 
-function fwd(from: number, to: number, n: number) {
-  return (to - from + n) % n;
+function cellKey(p: Point) {
+  return `${p.x},${p.y}`;
+}
+
+function manhattan(a: Point, b: Point) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
 function willGrow(state: GameState, cell: Point) {
@@ -42,21 +46,11 @@ function isOccupied(state: GameState, cell: Point, growing: boolean) {
   });
 }
 
-function maxShortcut(fill: number, distApple: number) {
-  if (fill < 0.28) return distApple;
-  if (fill < 0.45) return Math.min(distApple, 48);
-  if (fill < 0.62) return Math.min(distApple, 16);
-  return Math.min(distApple, 4);
-}
-
-function nearestAhead(state: GameState, headI: number, n: number) {
+function nearestFood(state: GameState, from: Point) {
   let best: Point | null = null;
   let bestDist = Infinity;
   for (const food of state.foods) {
-    const foodI = state.cycleIndex[food.y]?.[food.x];
-    if (foodI == null || foodI < 0) continue;
-    const dist = fwd(headI, foodI, n);
-    if (dist === 0) continue;
+    const dist = manhattan(from, food);
     if (dist < bestDist) {
       bestDist = dist;
       best = food;
@@ -65,27 +59,56 @@ function nearestAhead(state: GameState, headI: number, n: number) {
   return best ? { food: best, dist: bestDist } : null;
 }
 
+function blockedCells(state: GameState, growing: boolean) {
+  const blocked = new Set<string>();
+  const tail = state.snake.length - 1;
+  for (let i = 0; i < state.snake.length; i += 1) {
+    if (!growing && i === tail) continue;
+    blocked.add(cellKey(state.snake[i]));
+  }
+  return blocked;
+}
+
+function leftoverSafe(state: GameState, cell: Point) {
+  const growing = willGrow(state, cell);
+  if (isOccupied(state, cell, growing)) return false;
+  const blocked = blockedCells(state, growing);
+  const tail = state.snake[state.snake.length - 1];
+  const seen = new Set<string>([cellKey(cell)]);
+  const queue: Point[] = [cell];
+  let reachesTail = !growing && cell.x === tail.x && cell.y === tail.y;
+
+  while (queue.length) {
+    const cur = queue.pop()!;
+    if (manhattan(cur, tail) === 1) reachesTail = true;
+    if (!growing && cur.x === tail.x && cur.y === tail.y) reachesTail = true;
+    for (const dir of DIRS) {
+      const next = { x: cur.x + DELTA[dir].x, y: cur.y + DELTA[dir].y };
+      if (next.x < 0 || next.y < 0 || next.x >= state.cols || next.y >= state.rows) continue;
+      const id = cellKey(next);
+      if (seen.has(id) || blocked.has(id)) continue;
+      seen.add(id);
+      queue.push(next);
+    }
+  }
+
+  const need = state.snake.length + (growing ? 1 : 0);
+  return reachesTail && seen.size >= need;
+}
+
 export function pickAutoplayDir(state: GameState): Direction {
   const facing = state.queued.at(-1) ?? state.direction;
   const head = state.snake[0];
-  const tail = state.snake[state.snake.length - 1];
   const nxt = state.cycleNext[head.y]?.[head.x];
   const cycleDir = (nxt && dirBetween(head, nxt)) || facing;
   if (!nxt) return facing;
 
-  const n = state.cols * state.rows;
-  const fill = state.snake.length / n;
-  if (fill >= 0.72) return cycleDir;
+  const fill = state.snake.length / (state.cols * state.rows);
+  if (fill >= 0.58) return cycleDir;
 
-  const headI = state.cycleIndex[head.y]?.[head.x];
-  const tailI = state.cycleIndex[tail.y]?.[tail.x];
-  if (headI == null || tailI == null || headI < 0 || tailI < 0) return cycleDir;
-
-  const target = nearestAhead(state, headI, n);
+  const target = nearestFood(state, head);
   if (!target) return cycleDir;
 
-  const distTail = fwd(headI, tailI, n);
-  const jumpLimit = maxShortcut(fill, target.dist);
   let best: Direction | null = null;
   let bestScore = Infinity;
 
@@ -93,19 +116,12 @@ export function pickAutoplayDir(state: GameState): Direction {
     if (dir === OPPOSITE[state.direction]) continue;
     const cell = { x: head.x + DELTA[dir].x, y: head.y + DELTA[dir].y };
     if (cell.x < 0 || cell.y < 0 || cell.x >= state.cols || cell.y >= state.rows) continue;
-    const growing = willGrow(state, cell);
-    if (isOccupied(state, cell, growing)) continue;
+    if (!leftoverSafe(state, cell)) continue;
 
-    const cellI = state.cycleIndex[cell.y]?.[cell.x];
-    if (cellI == null || cellI < 0) continue;
-    const distNext = fwd(headI, cellI, n);
-    if (distNext === 0) continue;
-    if (growing ? distNext >= distTail : distNext > distTail) continue;
-    if (distNext > jumpLimit) continue;
+    const dist = manhattan(cell, target.food);
+    if (dist >= target.dist && dir !== cycleDir) continue;
 
-    const left = fwd(cellI, state.cycleIndex[target.food.y][target.food.x], n);
-    const manh = Math.abs(cell.x - target.food.x) + Math.abs(cell.y - target.food.y);
-    const score = left * 10 + manh;
+    const score = dist * 10 + (dir === cycleDir ? 1 : 0);
     if (score < bestScore) {
       bestScore = score;
       best = dir;
