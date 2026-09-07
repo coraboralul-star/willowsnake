@@ -238,7 +238,7 @@ function mergeCycles(a: Point[], b: Point[], w: number, h: number): Point[] | nu
   }
 
   if (spots.length === 0) return null;
-  const winners: Point[] = [];
+  const winners: Point[][] = [];
   let bestScore = -Infinity;
   for (const spot of spots) {
     const merged = spliceCycles(a, b, w, h, spot.p, spot.p2, spot.q, spot.endB, spot.walkB);
