@@ -23,6 +23,7 @@ export function enableAutoplay() {
 export function autoplayOnNewRun(_tickMs = 114) {}
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
+const MAX_CUT = 4;
 
 function dirBetween(from: Point, to: Point): Direction | null {
   const dx = to.x - from.x;
@@ -42,35 +43,27 @@ function fwd(from: number, to: number, n: number) {
   return (to - from + n) % n;
 }
 
+function sameTile(a: Point, b: Point) {
+  return Math.floor(a.x / TILE_W) === Math.floor(b.x / TILE_W) &&
+    Math.floor(a.y / TILE_H) === Math.floor(b.y / TILE_H);
+}
+
 function willGrow(state: GameState, cell: Point) {
   if (state.pendingGrow > 0) return true;
   return state.foods.some((food) => food.x === cell.x && food.y === cell.y);
 }
 
-function tileKey(p: Point) {
-  return `${Math.floor(p.x / TILE_W)},${Math.floor(p.y / TILE_H)}`;
-}
-
-function hottestFood(state: GameState, from: Point) {
-  if (state.foods.length === 0) return null;
-  const counts = new Map<string, number>();
-  for (const food of state.foods) {
-    const id = tileKey(food);
-    counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
-  let best = state.foods[0];
-  let bestCount = -1;
+function nearestApple(state: GameState, from: Point) {
+  let best: Point | null = null;
   let bestDist = Infinity;
   for (const food of state.foods) {
-    const count = counts.get(tileKey(food)) ?? 0;
     const dist = manhattan(from, food);
-    if (count > bestCount || (count === bestCount && dist < bestDist)) {
-      best = food;
-      bestCount = count;
+    if (dist < bestDist) {
       bestDist = dist;
+      best = food;
     }
   }
-  return best;
+  return best ? { food: best, dist: bestDist } : null;
 }
 
 export function pickAutoplayDir(state: GameState): Direction {
@@ -81,19 +74,23 @@ export function pickAutoplayDir(state: GameState): Direction {
   const cycleDir = (nxt && dirBetween(head, nxt)) || facing;
   if (!nxt) return facing;
 
-  const n = state.cols * state.rows;
-  if (state.snake.length / n >= 0.7) return cycleDir;
+  const apple = nearestApple(state, head);
+  if (!apple) return cycleDir;
 
+  const n = state.cols * state.rows;
   const headI = state.cycleIndex[head.y]?.[head.x];
   const tailI = state.cycleIndex[tail.y]?.[tail.x];
-  if (headI == null || tailI == null || headI < 0 || tailI < 0) return cycleDir;
+  const appleI = state.cycleIndex[apple.food.y]?.[apple.food.x];
+  if (headI == null || tailI == null || appleI == null || headI < 0 || appleI < 0) {
+    return cycleDir;
+  }
 
-  const target = hottestFood(state, head);
-  if (!target) return cycleDir;
-  const targetI = state.cycleIndex[target.y]?.[target.x];
-  if (targetI == null || targetI < 0) return cycleDir;
+  const distApple = fwd(headI, appleI, n);
+  const inTile = sameTile(head, apple.food);
+  const close = apple.dist <= 3;
+  if (!inTile && !close) return cycleDir;
+  if (distApple > TILE_W * TILE_H) return cycleDir;
 
-  const distApple = fwd(headI, targetI, n);
   const distTail = fwd(headI, tailI, n);
   let best: Direction | null = null;
   let bestLeft = Infinity;
@@ -112,10 +109,10 @@ export function pickAutoplayDir(state: GameState): Direction {
     const cellI = state.cycleIndex[cell.y]?.[cell.x];
     if (cellI == null || cellI < 0) continue;
     const distNext = fwd(headI, cellI, n);
-    if (distNext === 0 || distNext > distApple) continue;
+    if (distNext === 0 || distNext > MAX_CUT || distNext > distApple) continue;
     if (growing ? distNext >= distTail : distNext > distTail) continue;
 
-    const left = fwd(cellI, targetI, n);
+    const left = fwd(cellI, appleI, n);
     if (left < bestLeft) {
       bestLeft = left;
       best = dir;
