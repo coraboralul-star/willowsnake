@@ -14,7 +14,7 @@ import { useSessionStats } from "@/hooks/useSessionStats";
 import { useSnakeGame } from "@/hooks/useSnakeGame";
 import { BOARD_COLS, BOARD_ROWS } from "@/lib/engine";
 import { isGiftTestMode } from "@/lib/gifts";
-import { connectTikTokLive, type TikTokBridgeStatus } from "@/lib/tiktokLive";
+import { connectTikTokLive } from "@/lib/tiktokLive";
 
 type GameAppProps = {
   enabled: boolean;
@@ -30,14 +30,15 @@ export function GameApp({ enabled }: GameAppProps) {
     record,
   );
   const [giftTest, setGiftTest] = useState(false);
-  const [tiktok, setTiktok] = useState<TikTokBridgeStatus | null>(null);
   const liveBest = Math.max(best, ui.score);
   const isNewBest = ui.score > 0 && ui.score >= liveBest && ui.score > (best || 0);
   const overlay = ui.status === "over" || ui.status === "won" || ui.status === "paused";
 
   useEffect(() => {
     setGiftTest(isGiftTestMode());
-    const handle = connectTikTokLive({ onStatus: setTiktok });
+    const host = window.location.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") return;
+    const handle = connectTikTokLive();
     return () => handle.disconnect();
   }, []);
 
@@ -98,15 +99,6 @@ export function GameApp({ enabled }: GameAppProps) {
         <span className="mx-2 text-ink-soft">·</span>
         {session.wins} wins
       </p>
-      {tiktok && (
-        <p className="relative z-10 text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-ink-soft">
-          TikTok
-          <span className="mx-2">·</span>
-          {tiktok.connected ? "live" : "waiting"}
-          {tiktok.message ? <span className="ml-2 opacity-70">{tiktok.message}</span> : null}
-        </p>
-      )}
-
       {giftTest && <GiftTestBar />}
 
       <section className="relative z-10 flex w-full flex-row items-center justify-center gap-3">

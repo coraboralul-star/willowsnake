@@ -3,7 +3,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import confetti from "canvas-confetti";
 import {
-  BASE_TICK,
   spinePath,
   type Direction,
   type Food,
@@ -11,7 +10,6 @@ import {
   type Point,
 } from "@/lib/engine";
 import { onLiveAlert } from "@/lib/gifts";
-import { isPageVisible, onPageVisibility } from "@/lib/pageVisible";
 import { resumeAudio } from "@/lib/sfx";
 
 type GameBoardProps = {
@@ -69,7 +67,6 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let frame = 0;
     let ticker = 0;
     let width = 0;
     let height = 0;
@@ -100,14 +97,12 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     observer.observe(wrap);
     resize();
 
-    const draw = (now: number) => {
-      advanceRef.current(now);
-
+    const paint = (now: number) => {
       const state = liveRef.current;
       const cols = state.cols;
       const rows = state.rows;
       const cell = width / cols;
-      const dt = Math.min(32, now - lastTs);
+      const dt = Math.min(50, now - lastTs);
       lastTs = now;
       const progress = reduced
         ? 1
@@ -132,29 +127,17 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       const facing = facingFrom(state.prevSnake[0], state.snake[0], state.direction);
       drawSnake(ctx, points, cell, facing, now, state.ateAt, now < state.glowUntil);
       drawFx(ctx, particles, floaters, cell);
-
-      frame = requestAnimationFrame(draw);
     };
 
-    const syncLoop = (visible = isPageVisible()) => {
-      cancelAnimationFrame(frame);
-      window.clearInterval(ticker);
-      frame = 0;
-      ticker = 0;
+    const pulse = () => {
       resumeAudio();
-      if (visible) {
-        lastTs = performance.now();
-        lastAte = liveRef.current.ateAt;
-        frame = requestAnimationFrame(draw);
-        return;
-      }
-      ticker = window.setInterval(() => {
-        resumeAudio();
-        advanceRef.current(performance.now());
-      }, liveRef.current.tickMs || BASE_TICK);
+      const now = performance.now();
+      advanceRef.current(now);
+      paint(now);
     };
 
-    const stopWatching = onPageVisibility(syncLoop);
+    ticker = window.setInterval(pulse, 50);
+
     const stopAlerts = onLiveAlert((alert) => {
       const rect = canvas.getBoundingClientRect();
       const palette =
@@ -178,13 +161,13 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         });
       }
     });
-    syncLoop();
+    lastTs = performance.now();
+    lastAte = liveRef.current.ateAt;
+    pulse();
 
     return () => {
       observer.disconnect();
-      stopWatching();
       stopAlerts();
-      cancelAnimationFrame(frame);
       window.clearInterval(ticker);
     };
   }, [liveRef]);

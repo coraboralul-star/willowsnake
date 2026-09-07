@@ -290,135 +290,43 @@ function coil(w: number, h: number): Point[] | null {
   );
 }
 
-type Piece = { w: number; h: number; x: number; y: number };
-
-function coilPieces(pieces: Piece[], w: number, h: number): Point[] | null {
-  const cycles: Point[][] = [];
-  for (const piece of pieces) {
-    const path = coil(piece.w, piece.h);
-    if (!path) return null;
-    cycles.push(offset(path, piece.x, piece.y));
-  }
-  return joinPath(cycles, w, h);
+function foldVertical(w: number, h: number): Point[] | null {
+  if (w % 2 !== 0) return null;
+  const parts: Point[][] = [];
+  for (let x = 0; x < w; x += 2) parts.push(offset(stripCycle(2, h), x, 0));
+  return joinPath(parts, w, h);
 }
 
-function cutsAlong(total: number, other: number): [number, number][] {
-  const out: [number, number][] = [];
-  for (let a = 2; a <= total - 2; a += 1) {
-    const b = total - a;
-    if (canCycle(a, other) && canCycle(b, other)) out.push([a, b]);
-  }
-  return out;
+function foldHorizontal(w: number, h: number): Point[] | null {
+  if (h % 2 !== 0) return null;
+  const parts: Point[][] = [];
+  for (let y = 0; y < h; y += 2) parts.push(offset(stripCycle(w, 2), 0, y));
+  return joinPath(parts, w, h);
 }
 
-function triplesAlong(total: number, other: number): [number, number, number][] {
-  const out: [number, number, number][] = [];
-  for (let a = 2; a <= total - 4; a += 1) {
-    for (let b = 2; a + b <= total - 2; b += 1) {
-      const c = total - a - b;
-      if (c < 2) continue;
-      if (canCycle(a, other) && canCycle(b, other) && canCycle(c, other)) {
-        out.push([a, b, c]);
-      }
+function bandFill(w: number, h: number, band: number, axis: "x" | "y"): Point[] | null {
+  if (band < 2 || (axis === "x" ? w : h) < band) return null;
+  const parts: Point[][] = [];
+  if (axis === "x") {
+    for (let x = 0; x < w; ) {
+      const bw = Math.min(band, w - x);
+      if (!canCycle(bw, h)) return null;
+      const piece = bw === 2 ? stripCycle(bw, h) : coil(bw, h);
+      if (!piece) return null;
+      parts.push(offset(piece, x, 0));
+      x += bw;
+    }
+  } else {
+    for (let y = 0; y < h; ) {
+      const bh = Math.min(band, h - y);
+      if (!canCycle(w, bh)) return null;
+      const piece = bh === 2 ? stripCycle(w, bh) : coil(w, bh);
+      if (!piece) return null;
+      parts.push(offset(piece, 0, y));
+      y += bh;
     }
   }
-  return out;
-}
-
-function splitVertical(w: number, h: number): Point[] | null {
-  const cut = pick(cutsAlong(w, h));
-  if (!cut) return null;
-  const [a, b] = cut;
-  return coilPieces(
-    [
-      { w: a, h, x: 0, y: 0 },
-      { w: b, h, x: a, y: 0 },
-    ],
-    w,
-    h,
-  );
-}
-
-function splitHorizontal(w: number, h: number): Point[] | null {
-  const cut = pick(cutsAlong(h, w));
-  if (!cut) return null;
-  const [a, b] = cut;
-  return coilPieces(
-    [
-      { w, h: a, x: 0, y: 0 },
-      { w, h: b, x: 0, y: a },
-    ],
-    w,
-    h,
-  );
-}
-
-function splitTripleVertical(w: number, h: number): Point[] | null {
-  const cut = pick(triplesAlong(w, h));
-  if (!cut) return null;
-  const [a, b, c] = cut;
-  return coilPieces(
-    [
-      { w: a, h, x: 0, y: 0 },
-      { w: b, h, x: a, y: 0 },
-      { w: c, h, x: a + b, y: 0 },
-    ],
-    w,
-    h,
-  );
-}
-
-function splitTripleHorizontal(w: number, h: number): Point[] | null {
-  const cut = pick(triplesAlong(h, w));
-  if (!cut) return null;
-  const [a, b, c] = cut;
-  return coilPieces(
-    [
-      { w, h: a, x: 0, y: 0 },
-      { w, h: b, x: 0, y: a },
-      { w, h: c, x: 0, y: a + b },
-    ],
-    w,
-    h,
-  );
-}
-
-function splitQuad(w: number, h: number): Point[] | null {
-  const cutX = pick(cutsAlong(w, Math.floor(h / 2)));
-  const cutY = pick(cutsAlong(h, Math.floor(w / 2)));
-  if (!cutX || !cutY) return null;
-  const [lw, rw] = cutX;
-  const [th, bh] = cutY;
-  return coilPieces(
-    [
-      { w: lw, h: th, x: 0, y: 0 },
-      { w: rw, h: th, x: lw, y: 0 },
-      { w: lw, h: bh, x: 0, y: th },
-      { w: rw, h: bh, x: lw, y: th },
-    ],
-    w,
-    h,
-  );
-}
-
-function splitSix(w: number, h: number): Point[] | null {
-  const cutX = pick(cutsAlong(w, Math.floor(h / 3)));
-  const cutY = pick(triplesAlong(h, Math.floor(w / 2)));
-  if (!cutX || !cutY) return null;
-  const [lw, rw] = cutX;
-  const [a, b, c] = cutY;
-  return coilPieces(
-    [
-      { w: lw, h: a, x: 0, y: 0 },
-      { w: rw, h: a, x: lw, y: 0 },
-      { w: lw, h: b, x: 0, y: a },
-      { w: rw, h: b, x: lw, y: a },
-      { w: lw, h: c, x: 0, y: a + b },
-      { w: rw, h: c, x: lw, y: a + b },
-    ],
-    w,
-    h,
-  );
+  return joinPath(parts, w, h);
 }
 
 function dress(order: Point[], w: number, h: number) {
@@ -431,27 +339,25 @@ function dress(order: Point[], w: number, h: number) {
   }));
 }
 
-function buildSpiral(w: number, h: number): Point[] | null {
+function buildTight(w: number, h: number): Point[] | null {
   const builders = [
-    () => coil(w, h),
-    () => coil(w, h),
-    () => splitVertical(w, h),
-    () => splitHorizontal(w, h),
-    () => splitTripleVertical(w, h),
-    () => splitTripleHorizontal(w, h),
-    () => splitQuad(w, h),
-    () => splitSix(w, h),
+    () => foldVertical(w, h),
+    () => foldVertical(w, h),
+    () => foldHorizontal(w, h),
+    () => foldHorizontal(w, h),
+    () => bandFill(w, h, 4, "x"),
+    () => bandFill(w, h, 4, "y"),
   ];
   for (const builder of builders.sort(() => Math.random() - 0.5)) {
     const order = builder();
     if (order && isBoardCycle(order, w, h)) return order;
   }
-  return coil(w, h);
+  return foldVertical(w, h) ?? foldHorizontal(w, h);
 }
 
 export function generateCycleNext(w: number, h = w): Point[][] {
-  let order = buildSpiral(w, h);
-  if (!order || !isBoardCycle(order, w, h)) order = coil(w, h);
+  let order = buildTight(w, h);
+  if (!order || !isBoardCycle(order, w, h)) order = foldVertical(w, h) ?? foldHorizontal(w, h);
   if (order && isBoardCycle(order, w, h)) order = dress(order, w, h);
   if (!order || !isBoardCycle(order, w, h)) order = coil(w, h);
   if (!order || !isBoardCycle(order, w, h)) order = serpentine(w, h);

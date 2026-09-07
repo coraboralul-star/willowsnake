@@ -98,17 +98,45 @@ function wouldBunch(foods: Point[], cell: Point) {
   return false;
 }
 
+function densestFood(foods: Food[]) {
+  if (foods.length === 0) return null;
+  let best = foods[0];
+  let bestCount = -1;
+  for (const food of foods) {
+    const count = foods.filter(
+      (other) => Math.abs(food.x - other.x) + Math.abs(food.y - other.y) <= 4,
+    ).length;
+    if (count > bestCount) {
+      best = food;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+function stepBack(prev: Point[][], start: Point, steps: number) {
+  let cur = start;
+  for (let i = 0; i < steps; i += 1) cur = prev[cur.y][cur.x];
+  return cur;
+}
+
 export function createGame(cols: number, rows = cols): GameState {
   const cycleNext = generateCycleNext(cols, rows);
   const prev = cyclePrev(cycleNext, cols, rows);
-  const head = {
-    x: Math.floor(Math.random() * cols),
-    y: Math.floor(Math.random() * rows),
-  };
+  const foods = spawnFoods([], [], cols, rows);
+  const focus = densestFood(foods);
+  const head = focus
+    ? stepBack(prev, focus, 3)
+    : {
+        x: Math.floor(Math.random() * cols),
+        y: Math.floor(Math.random() * rows),
+      };
   const neck = prev[head.y][head.x];
   const tail = prev[neck.y][neck.x];
   const snake: Point[] = [head, neck, tail];
   const direction = dirOf(head, cycleNext[head.y][head.x]);
+  const taken = new Set(snake.map(foodKey));
+  const kept = foods.filter((food) => !taken.has(foodKey(food)));
 
   return {
     cols,
@@ -118,7 +146,7 @@ export function createGame(cols: number, rows = cols): GameState {
     prevSnake: snake.map((p) => ({ ...p })),
     direction,
     queued: [],
-    foods: spawnFoods(snake, [], cols, rows),
+    foods: spawnFoods(snake, kept, cols, rows),
     cycleNext,
     cycleIndex: cycleIndex(cycleNext, cols, rows),
     score: 0,
