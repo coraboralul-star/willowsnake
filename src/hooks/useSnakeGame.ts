@@ -210,8 +210,11 @@ export function useSnakeGame(
     const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
     while (now - liveRef.current.tickStartedAt >= liveRef.current.tickMs) {
       let current = liveRef.current;
+      if (current.hijacked && current.hijackUntil > 0 && now >= current.hijackUntil) {
+        current = { ...current, hijacked: false, hijackUntil: 0, hijackStartedAt: 0 };
+      }
       if (current.hijacked) {
-        current = applyHijackDir(current, pickHijackDir(current));
+        current = applyHijackDir(current, pickHijackDir(current, now));
       } else if (isAutoplay()) {
         const facing = current.queued.at(0) ?? current.direction;
         const dir = pickAutoplayDir(current);
@@ -221,7 +224,11 @@ export function useSnakeGame(
 
       const next = step(current, now);
       next.tickStartedAt = current.tickStartedAt + current.tickMs;
-      if (next.status === "over" || next.status === "won") next.hijacked = false;
+      if (next.status === "over" || next.status === "won") {
+        next.hijacked = false;
+        next.hijackUntil = 0;
+        next.hijackStartedAt = 0;
+      }
       liveRef.current = next;
       advanced = true;
 

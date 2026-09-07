@@ -52,13 +52,28 @@ function isDeadly(state: GameState, dir: Direction) {
   return state.snake.some((part) => part.x === next.x && part.y === next.y);
 }
 
-export function pickHijackDir(state: GameState): Direction {
-  if (Math.random() < 0.01) {
-    const deadly = HIJACK_DIRS.filter((dir) => isDeadly(state, dir));
-    if (deadly.length > 0) return deadly[Math.floor(Math.random() * deadly.length)];
+export function pickHijackDir(state: GameState, now: number): Direction {
+  const deadly = HIJACK_DIRS.filter((dir) => isDeadly(state, dir));
+  const safe = HIJACK_DIRS.filter(
+    (dir) => dir !== OPPOSITE[state.direction] && !isDeadly(state, dir),
+  );
+  if (deadly.length > 0 && Math.random() < hijackKillChance(state, now)) {
+    return deadly[Math.floor(Math.random() * deadly.length)];
   }
-  const wander = HIJACK_DIRS.filter((dir) => dir !== OPPOSITE[state.direction]);
-  return wander[Math.floor(Math.random() * wander.length)] ?? state.direction;
+  if (safe.length > 0) return safe[Math.floor(Math.random() * safe.length)];
+  return state.direction;
+}
+
+function hijackKillChance(state: GameState, now: number) {
+  const started = state.hijackStartedAt;
+  const until = state.hijackUntil;
+  if (!started || !until || until <= started) return 0;
+  const span = until - started;
+  const elapsed = now - started;
+  const safeUntil = span * 0.78;
+  if (elapsed < safeUntil) return 0;
+  const t = Math.min(1, (elapsed - safeUntil) / Math.max(1, span - safeUntil));
+  return 0.00001 + t * t * 0.008;
 }
 
 export const DIR_TO_KEY = {

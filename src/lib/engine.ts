@@ -56,6 +56,8 @@ export type GameState = {
   nitroUntil: number;
   slowUntil: number;
   hijacked: boolean;
+  hijackStartedAt: number;
+  hijackUntil: number;
 };
 
 export const DELTA: Record<Direction, Point> = {
@@ -76,6 +78,7 @@ export const BASE_TICK = 114;
 export const MIN_TICK = 55;
 export const NITRO_TICK = 55;
 export const SLOW_TICK = 180;
+export const HIJACK_MS = 14400;
 
 export function foodTarget(cols: number, rows: number) {
   return 9 + (cols - 12) + Math.floor((rows - cols) / 2);
@@ -143,6 +146,8 @@ export function createGame(cols: number, rows = cols): GameState {
     nitroUntil: 0,
     slowUntil: 0,
     hijacked: false,
+    hijackStartedAt: 0,
+    hijackUntil: 0,
   };
 }
 
@@ -353,6 +358,8 @@ export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: 
     next = {
       ...next,
       hijacked: true,
+      hijackStartedAt: now,
+      hijackUntil: now + HIJACK_MS,
       status: next.status === "paused" ? "playing" : next.status,
     };
   }
