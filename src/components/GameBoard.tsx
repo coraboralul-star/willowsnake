@@ -77,6 +77,8 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     let lastTs = performance.now();
     const particles: Particle[] = [];
     const floaters: Floater[] = [];
+    const boardCache = document.createElement("canvas");
+    const boardCtx = boardCache.getContext("2d");
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -93,7 +95,14 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingEnabled = false;
+      if (boardCtx) {
+        boardCache.width = Math.floor(width * dpr);
+        boardCache.height = Math.floor(height * dpr);
+        boardCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        boardCtx.imageSmoothingEnabled = false;
+        drawBoard(boardCtx, width, height, cols, rows, width / cols);
+      }
     };
 
     const observer = new ResizeObserver(resize);
@@ -121,7 +130,11 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       }
 
       ctx.clearRect(0, 0, width, height);
-      drawBoard(ctx, width, height, cols, rows, cell);
+      if (boardCache.width && boardCache.height) {
+        ctx.drawImage(boardCache, 0, 0, width, height);
+      } else {
+        drawBoard(ctx, width, height, cols, rows, cell);
+      }
       drawEatFlash(ctx, width, height, now, state.ateAt);
       drawFoods(ctx, state.foods, cell, now);
       stepFx(particles, floaters, dt);
@@ -133,6 +146,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     };
 
     const draw = (now: number) => {
+      advanceRef.current(now);
       paint(now);
       frame = requestAnimationFrame(draw);
     };
@@ -144,13 +158,14 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       ticker = 0;
       lastTs = performance.now();
       lastAte = liveRef.current.ateAt;
-      ticker = window.setInterval(() => {
-        advanceRef.current(performance.now());
-      }, liveRef.current.tickMs || BASE_TICK);
       if (visible) {
         resumeAudio();
         frame = requestAnimationFrame(draw);
+        return;
       }
+      ticker = window.setInterval(() => {
+        advanceRef.current(performance.now());
+      }, liveRef.current.tickMs || BASE_TICK);
     };
 
     const stopWatching = onPageVisibility(syncLoop);

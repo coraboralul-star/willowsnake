@@ -202,18 +202,13 @@ export function useSnakeGame(
     }
 
     const lag = now - playing.tickStartedAt;
-    if (lag > playing.tickMs * 40) {
+    if (lag > playing.tickMs * 4) {
       playing.tickStartedAt = now - playing.tickMs;
     }
 
     let advanced = false;
-    let steps = 0;
     const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
-    while (
-      now - liveRef.current.tickStartedAt >= liveRef.current.tickMs &&
-      steps < 8
-    ) {
-      steps += 1;
+    while (now - liveRef.current.tickStartedAt >= liveRef.current.tickMs) {
       let current = liveRef.current;
       if (current.hijacked && current.hijackUntil > 0 && now >= current.hijackUntil) {
         current = { ...current, hijacked: false, hijackUntil: 0, hijackStartedAt: 0 };
