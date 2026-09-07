@@ -38,5 +38,10 @@ function toneClass(tone: LiveAlert["tone"]) {
   if (tone === "nitro") return "bg-[#29B6F6] text-[#083344]";
   if (tone === "hearts") return "bg-[#F48FB1] text-[#4A1530]";
   if (tone === "rain") return "bg-[#E53935] text-cream";
+  if (tone === "slow") return "bg-[#7E57C2] text-cream";
+  if (tone === "disco") return "bg-[#26A69A] text-[#00332E]";
+  if (tone === "party") return "bg-[#FB8C00] text-[#3E1F00]";
+  if (tone === "lucky") return "bg-[#8D6E63] text-cream";
+  if (tone === "cheer") return "bg-[#90CAF9] text-[#0D47A1]";
   return "bg-cream text-ink";
 }

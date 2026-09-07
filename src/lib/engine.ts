@@ -51,6 +51,7 @@ export type GameState = {
   pendingGrow: number;
   glowUntil: number;
   nitroUntil: number;
+  slowUntil: number;
 };
 
 export const DELTA: Record<Direction, Point> = {
@@ -70,6 +71,7 @@ export const OPPOSITE: Record<Direction, Direction> = {
 export const BASE_TICK = 100;
 export const MIN_TICK = 55;
 export const NITRO_TICK = 55;
+export const SLOW_TICK = 180;
 
 export function foodTarget(gridSize: number) {
   return 9 + (gridSize - 12);
@@ -133,6 +135,7 @@ export function createGame(gridSize: number): GameState {
     pendingGrow: 0,
     glowUntil: 0,
     nitroUntil: 0,
+    slowUntil: 0,
   };
 }
 
@@ -198,7 +201,9 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
       )
     : state.foods;
 
-  const tickMs = state.nitroUntil && now >= state.nitroUntil ? BASE_TICK : state.tickMs;
+  const nitroUntil = state.nitroUntil && now >= state.nitroUntil ? 0 : state.nitroUntil;
+  const slowUntil = state.slowUntil && now >= state.slowUntil ? 0 : state.slowUntil;
+  const tickMs = nitroUntil ? NITRO_TICK : slowUntil ? SLOW_TICK : BASE_TICK;
 
   return {
     ...state,
@@ -210,7 +215,8 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     score: eating ? state.score + (eaten.kind === "golden" ? 3 : 1) : state.score,
     tickMs,
     pendingGrow,
-    nitroUntil: state.nitroUntil && now >= state.nitroUntil ? 0 : state.nitroUntil,
+    nitroUntil,
+    slowUntil,
     status: filled ? "won" : state.status,
     ateAt: eating ? now : state.ateAt,
     foodAt: eating ? now : state.foodAt,
@@ -273,6 +279,7 @@ type GiftDrop = {
   golden: number;
   hearts: number;
   nitroMs: number;
+  slowMs: number;
   glowMs: number;
 };
 
@@ -318,6 +325,13 @@ export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: 
       ...next,
       tickMs: NITRO_TICK,
       nitroUntil: Math.max(next.nitroUntil, now) + drop.nitroMs,
+    };
+  }
+  if (drop.slowMs > 0) {
+    next = {
+      ...next,
+      tickMs: next.nitroUntil > now ? NITRO_TICK : SLOW_TICK,
+      slowUntil: Math.max(next.slowUntil, now) + drop.slowMs,
     };
   }
   if (drop.glowMs > 0) {

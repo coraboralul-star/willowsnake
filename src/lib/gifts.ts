@@ -8,13 +8,14 @@ export type LiveGift = {
   diamonds?: number;
 };
 
-export type GiftTone = "rose" | "rain" | "golden" | "nitro" | "hearts";
+export type GiftTone = "rose" | "rain" | "golden" | "nitro" | "hearts" | "slow" | "disco" | "party" | "cheer" | "lucky";
 
 export type GiftAction = {
   apples: number;
   golden: number;
   hearts: number;
   nitroMs: number;
+  slowMs: number;
   glowMs: number;
   confetti: boolean;
   label: string;
@@ -34,7 +35,14 @@ export const TEST_GIFTS: { name: string; label: string }[] = [
   { name: "Golden", label: "Golden" },
   { name: "Nitro", label: "Nitro" },
   { name: "Hearts", label: "Hearts" },
+  { name: "Slow", label: "Slow-mo" },
+  { name: "Disco", label: "Disco" },
+  { name: "Party", label: "Party" },
+  { name: "Cheer", label: "Cheer" },
+  { name: "Lucky", label: "Lucky" },
 ];
+
+const LUCKY_NAMES = ["Rose", "Golden", "Nitro", "Hearts", "Slow", "Disco", "Party"] as const;
 
 type GiftHandler = (gift: LiveGift) => void;
 type AlertHandler = (alert: LiveAlert) => void;
@@ -78,10 +86,31 @@ export function testGift(name: string, user = "Test gifter") {
   });
 }
 
+function snack(label: string, tone: GiftTone, extra: Partial<GiftAction> = {}): GiftAction {
+  return {
+    apples: 0,
+    golden: 0,
+    hearts: 0,
+    nitroMs: 0,
+    slowMs: 0,
+    glowMs: 0,
+    confetti: false,
+    label,
+    tone,
+    ...extra,
+  };
+}
+
 export function resolveGift(gift: LiveGift): GiftAction {
   const name = gift.name.toLowerCase();
   const n = Math.max(1, gift.repeat ?? 1);
   const diamonds = gift.diamonds ?? 0;
+
+  if (name.includes("lucky") || name.includes("mystery") || name.includes("box")) {
+    const pick = LUCKY_NAMES[Math.floor(Math.random() * LUCKY_NAMES.length)];
+    const action = resolveGift({ ...gift, name: pick });
+    return { ...action, label: `Lucky · ${action.label}`, tone: "lucky" };
+  }
 
   if (
     name.includes("gold") ||
@@ -89,61 +118,71 @@ export function resolveGift(gift: LiveGift): GiftAction {
     name.includes("lion") ||
     diamonds >= 100
   ) {
-    return {
-      apples: 0,
+    return snack("Golden snack", "golden", {
       golden: 1,
-      hearts: 0,
-      nitroMs: 0,
       glowMs: 7000,
       confetti: true,
-      label: "Golden snack",
-      tone: "golden",
-    };
+    });
   }
+
   if (name.includes("nitro") || name.includes("gg") || name.includes("speed")) {
-    return {
+    return snack("Nitro", "nitro", {
       apples: 1,
-      golden: 0,
-      hearts: 0,
       nitroMs: 8000,
       glowMs: 8000,
-      confetti: false,
-      label: "Nitro",
-      tone: "nitro",
-    };
+    });
   }
+
   if (name.includes("heart") || name.includes("love") || name.includes("kiss")) {
-    return {
-      apples: 0,
-      golden: 0,
+    return snack("Heart rain", "hearts", {
       hearts: 3,
-      nitroMs: 0,
       glowMs: 6000,
       confetti: true,
-      label: "Heart rain",
-      tone: "hearts",
-    };
+    });
   }
+
+  if (name.includes("slow") || name.includes("chill") || name.includes("turtle")) {
+    return snack("Slow-mo", "slow", {
+      apples: 1,
+      slowMs: 8000,
+      glowMs: 8000,
+    });
+  }
+
+  if (name.includes("disco") || name.includes("rainbow") || name.includes("star")) {
+    return snack("Disco", "disco", {
+      apples: 1,
+      glowMs: 12000,
+      confetti: true,
+    });
+  }
+
+  if (name.includes("party") || name.includes("firework") || name.includes("confetti")) {
+    return snack("Party", "party", {
+      apples: 5,
+      hearts: 2,
+      glowMs: 5000,
+      confetti: true,
+    });
+  }
+
+  if (name.includes("cheer") || name.includes("clap") || name.includes("wave")) {
+    return snack("Cheer", "cheer", {
+      glowMs: 1600,
+      confetti: true,
+    });
+  }
+
   if (name.includes("bouquet") || name.includes("rosa") || n >= 5 || diamonds >= 10) {
-    return {
+    return snack("Apple rain", "rain", {
       apples: Math.min(12, 5 * n),
-      golden: 0,
-      hearts: 0,
-      nitroMs: 0,
       glowMs: 2500,
       confetti: true,
-      label: "Apple rain",
-      tone: "rain",
-    };
+    });
   }
-  return {
-    apples: Math.min(9, n),
-    golden: 0,
-    hearts: 0,
-    nitroMs: 0,
+
+  return snack("Snack", "rose", {
+    apples: 1,
     glowMs: 1800,
-    confetti: false,
-    label: "Snack",
-    tone: "rose",
-  };
+  });
 }

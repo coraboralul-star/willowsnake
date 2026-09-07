@@ -158,9 +158,15 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
             ? ["#F48FB1", "#E53935", "#FFF8E7"]
             : alert.tone === "nitro"
               ? ["#29B6F6", "#FFF8E7", "#43A047"]
-              : ["#E53935", "#43A047", "#F9A825", "#FFF8E7"];
+              : alert.tone === "slow"
+                ? ["#7E57C2", "#B39DDB", "#FFF8E7"]
+                : alert.tone === "disco"
+                  ? ["#26A69A", "#EC407A", "#FFD54F", "#29B6F6"]
+                  : alert.tone === "party" || alert.tone === "lucky"
+                    ? ["#FB8C00", "#E53935", "#F9A825", "#43A047", "#29B6F6"]
+                    : ["#E53935", "#43A047", "#F9A825", "#FFF8E7"];
       confetti({
-        particleCount: alert.tone === "rose" ? 24 : 90,
+        particleCount: alert.tone === "rose" ? 24 : alert.tone === "cheer" ? 48 : 90,
         spread: 72,
         startVelocity: 32,
         gravity: 0.85,
