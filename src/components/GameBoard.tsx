@@ -117,7 +117,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       ctx.clearRect(0, 0, width, width);
       drawBoard(ctx, width, grid, cell);
       drawEatFlash(ctx, width, now, state.ateAt);
-      drawFood(ctx, state.food, cell, now, state.foodAt);
+      drawFoods(ctx, state.foods, cell, now);
       stepFx(particles, floaters, dt);
 
       const points = spinePath(state.prevSnake, state.snake, progress);
@@ -141,7 +141,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       }
       ticker = window.setInterval(() => {
         advanceRef.current(performance.now());
-      }, liveRef.current.tickMs || 120);
+      }, liveRef.current.tickMs || 100);
     };
 
     const stopWatching = onPageVisibility(syncLoop);
@@ -209,16 +209,25 @@ function drawEatFlash(
   ctx.fill();
 }
 
+function drawFoods(
+  ctx: CanvasRenderingContext2D,
+  foods: Point[],
+  cell: number,
+  now: number,
+) {
+  for (const food of foods) {
+    drawFood(ctx, food, cell, now);
+  }
+}
+
 function drawFood(
   ctx: CanvasRenderingContext2D,
   food: Point,
   cell: number,
   now: number,
-  foodAt: number,
 ) {
-  const appear = foodAt ? Math.min(1, (now - foodAt) / 160) : 1;
-  const pulse = 0.94 + Math.sin(now / 200) * 0.06;
-  const scale = (0.72 + 0.28 * easeOutBack(appear)) * pulse;
+  const pulse = 0.94 + Math.sin(now / 200 + food.x * 1.7 + food.y * 2.1) * 0.06;
+  const scale = 0.92 * pulse;
   const x = food.x * cell + cell / 2;
   const y = food.y * cell + cell / 2;
 
@@ -484,12 +493,6 @@ function drawFx(
     ctx.fillText(floater.text, floater.x, floater.y);
   }
   ctx.globalAlpha = 1;
-}
-
-function easeOutBack(t: number) {
-  const c = 1.70158;
-  const p = t - 1;
-  return 1 + (c + 1) * p * p * p + c * p * p;
 }
 
 function roundRect(

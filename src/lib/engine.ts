@@ -1,3 +1,5 @@
+import { cyclePrev, generateCycleNext } from "@/lib/hamilton";
+
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
 export type GameStatus = "idle" | "playing" | "paused" | "over" | "won";
@@ -33,7 +35,8 @@ export type GameState = {
   prevSnake: Point[];
   direction: Direction;
   queued: Direction[];
-  food: Point;
+  foods: Point[];
+  cycleNext: Point[][];
   score: number;
   status: GameStatus;
   tickStartedAt: number;
@@ -57,24 +60,60 @@ export const OPPOSITE: Record<Direction, Direction> = {
   right: "left",
 };
 
-export const BASE_TICK = 120;
-export const MIN_TICK = 120;
+export const BASE_TICK = 100;
+export const MIN_TICK = 100;
+
+export function foodTarget(gridSize: number) {
+  return 9 + (gridSize - 12);
+}
+
+function dirOf(from: Point, to: Point): Direction {
+  if (to.x === from.x + 1) return "right";
+  if (to.x === from.x - 1) return "left";
+  if (to.y === from.y + 1) return "down";
+  return "up";
+}
+
+function foodKey(p: Point) {
+  return `${p.x},${p.y}`;
+}
+
+function nearFood(a: Point, b: Point) {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) === 1;
+}
+
+function wouldBunch(foods: Point[], cell: Point) {
+  const neighbors = foods.filter((food) => nearFood(food, cell));
+  if (neighbors.length >= 2) return true;
+  if (neighbors.length === 1) {
+    const pal = neighbors[0];
+    if (foods.some((food) => (food.x !== pal.x || food.y !== pal.y) && nearFood(food, pal))) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function createGame(gridSize: number): GameState {
-  const mid = Math.floor(gridSize / 2);
-  const snake: Point[] = [
-    { x: mid, y: mid },
-    { x: mid - 1, y: mid },
-    { x: mid - 2, y: mid },
-  ];
+  const cycleNext = generateCycleNext(gridSize);
+  const prev = cyclePrev(cycleNext, gridSize);
+  const head = {
+    x: Math.floor(Math.random() * gridSize),
+    y: Math.floor(Math.random() * gridSize),
+  };
+  const neck = prev[head.y][head.x];
+  const tail = prev[neck.y][neck.x];
+  const snake: Point[] = [head, neck, tail];
+  const direction = dirOf(head, cycleNext[head.y][head.x]);
 
   return {
     gridSize,
     snake,
     prevSnake: snake.map((p) => ({ ...p })),
-    direction: "right",
+    direction,
     queued: [],
-    food: spawnFood(snake, gridSize),
+    foods: spawnFoods(snake, [], gridSize),
+    cycleNext,
     score: 0,
     status: "idle",
     tickStartedAt: 0,
@@ -120,7 +159,7 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
   }
 
-  const eating = nextHead.x === state.food.x && nextHead.y === state.food.y;
+  const eating = state.foods.some((food) => food.x === nextHead.x && food.y === nextHead.y);
   const body = eating ? state.snake : state.snake.slice(0, -1);
   if (body.some((p) => p.x === nextHead.x && p.y === nextHead.y)) {
     return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
@@ -130,6 +169,13 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
   if (!eating) snake.pop();
 
   const filled = snake.length >= state.gridSize * state.gridSize;
+  const foods = eating
+    ? spawnFoods(
+        snake,
+        state.foods.filter((food) => food.x !== nextHead.x || food.y !== nextHead.y),
+        state.gridSize,
+      )
+    : state.foods;
 
   return {
     ...state,
@@ -137,7 +183,7 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     snake,
     direction,
     queued,
-    food: eating ? spawnFood(snake, state.gridSize) : state.food,
+    foods,
     score: eating ? state.score + 1 : state.score,
     tickMs: state.tickMs,
     status: filled ? "won" : state.status,
@@ -167,18 +213,34 @@ export function spinePath(prev: Point[], curr: Point[], t: number): Point[] {
   return ribbonPath(prev, curr, t);
 }
 
-export function spawnFood(snake: Point[], gridSize: number): Point {
-  const taken = new Set(snake.map((p) => `${p.x},${p.y}`));
-  const empty: Point[] = [];
+export function spawnFoods(snake: Point[], foods: Point[], gridSize: number): Point[] {
+  const target = Math.min(foodTarget(gridSize), gridSize * gridSize - snake.length);
+  const taken = new Set([...snake, ...foods].map(foodKey));
+  const result = foods.map((food) => ({ ...food }));
 
-  for (let y = 0; y < gridSize; y += 1) {
-    for (let x = 0; x < gridSize; x += 1) {
-      if (!taken.has(`${x},${y}`)) empty.push({ x, y });
+  while (result.length < target) {
+    const spaced: Point[] = [];
+    const any: Point[] = [];
+    for (let y = 0; y < gridSize; y += 1) {
+      for (let x = 0; x < gridSize; x += 1) {
+        if (taken.has(`${x},${y}`)) continue;
+        const cell = { x, y };
+        any.push(cell);
+        if (!wouldBunch(result, cell)) spaced.push(cell);
+      }
     }
+    const pool = spaced.length > 0 ? spaced : any;
+    if (pool.length === 0) break;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    result.push(pick);
+    taken.add(foodKey(pick));
   }
 
-  if (empty.length === 0) return snake[0];
-  return empty[Math.floor(Math.random() * empty.length)];
+  return result;
+}
+
+export function spawnFood(snake: Point[], gridSize: number): Point {
+  return spawnFoods(snake, [], gridSize)[0] ?? snake[0];
 }
 
 function clonePoints(points: Point[]): Point[] {
