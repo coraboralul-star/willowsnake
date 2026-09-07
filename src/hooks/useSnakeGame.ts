@@ -58,11 +58,12 @@ function isTwo(event: KeyboardEvent) {
 }
 
 export function useSnakeGame(
-  gridSize: number,
+  cols: number,
+  rows: number,
   enabled = true,
   onEnd?: (score: number) => void,
 ) {
-  const liveRef = useRef<GameState>(createGame(gridSize));
+  const liveRef = useRef<GameState>(createGame(cols, rows));
   const onEndRef = useRef(onEnd);
   const comboRef = useRef({
     pristine: false,
@@ -76,7 +77,7 @@ export function useSnakeGame(
     score: 3,
     status: "idle",
     length: 3,
-    gridSize,
+    gridSize: cols,
   }));
   const [heldKey, setHeldKey] = useState<string | null>(null);
 
@@ -112,15 +113,12 @@ export function useSnakeGame(
     preloadKeySounds();
   }, []);
 
-  const reset = useCallback(
-    (nextSize = gridSize) => {
-      liveRef.current = createGame(nextSize);
-      comboRef.current.pristine = false;
-      comboRef.current.eligible = false;
-      publish();
-    },
-    [gridSize, publish],
-  );
+  const reset = useCallback(() => {
+    liveRef.current = createGame(cols, rows);
+    comboRef.current.pristine = false;
+    comboRef.current.eligible = false;
+    publish();
+  }, [cols, rows, publish]);
 
   const start = useCallback(() => {
     if (retryRef.current != null) {
@@ -128,12 +126,12 @@ export function useSnakeGame(
       retryRef.current = null;
     }
     applyComboToggle();
-    liveRef.current = startRun(createGame(gridSize), performance.now());
+    liveRef.current = startRun(createGame(cols, rows), performance.now());
     if (isAutoplay()) autoplayOnNewRun(liveRef.current.tickMs);
     keysRef.current?.reset();
     beginRun();
     publish();
-  }, [applyComboToggle, beginRun, gridSize, publish]);
+  }, [applyComboToggle, beginRun, cols, rows, publish]);
 
   const startRef = useRef(start);
   startRef.current = start;

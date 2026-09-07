@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import type { Direction, GameStatus } from "@/lib/engine";
 import { playKeyDown, playKeyUp, type GameKey } from "@/lib/keyboardSounds";
@@ -20,6 +21,20 @@ const KEYS: { id: GameKey; dir: Direction; label: string; className: string }[] 
 ];
 
 export const SIDE_RAIL_CLASS = "w-[168px] shrink-0";
+
+export function SideRailSlot({ children }: { children: ReactNode }) {
+  return (
+    <div className={`${SIDE_RAIL_CLASS} relative`}>
+      <div className="invisible pointer-events-none select-none" aria-hidden>
+        <div className="flex flex-col items-center gap-3">
+          <div className="grid h-[6.5rem] w-[168px] grid-cols-3 grid-rows-2 gap-2" />
+          <div className="h-12 w-[168px]" />
+        </div>
+      </div>
+      <div className="absolute inset-0">{children}</div>
+    </div>
+  );
+}
 
 export function KeyPad({ heldKey, onSteer, onPause, onRetry, status }: KeyPadProps) {
   const retry = status === "over" || status === "won";

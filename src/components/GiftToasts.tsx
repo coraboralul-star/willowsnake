@@ -16,7 +16,7 @@ export function GiftToasts() {
   }, []);
 
   return (
-    <div className="flex min-h-[168px] w-full flex-col items-stretch justify-center gap-2">
+    <div className="flex h-full w-full flex-col items-stretch justify-center gap-2">
       {alerts.map((alert) => (
         <p
           key={alert.id}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import confetti from "canvas-confetti";
 import {
+  BASE_TICK,
   spinePath,
   type Direction,
   type Food,
@@ -71,6 +72,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     let frame = 0;
     let ticker = 0;
     let width = 0;
+    let height = 0;
     let lastAte = 0;
     let lastTs = performance.now();
     const particles: Particle[] = [];
@@ -80,13 +82,16 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const resize = () => {
+      const cols = liveRef.current.cols;
+      const rows = liveRef.current.rows;
       const size = Math.floor(wrap.clientWidth);
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = size;
-      canvas.width = Math.floor(size * dpr);
-      canvas.height = Math.floor(size * dpr);
-      canvas.style.width = `${size}px`;
-      canvas.style.height = `${size}px`;
+      height = Math.floor((size * rows) / cols);
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.imageSmoothingEnabled = true;
     };
@@ -99,8 +104,9 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       advanceRef.current(now);
 
       const state = liveRef.current;
-      const grid = state.gridSize;
-      const cell = width / grid;
+      const cols = state.cols;
+      const rows = state.rows;
+      const cell = width / cols;
       const dt = Math.min(32, now - lastTs);
       lastTs = now;
       const progress = reduced
@@ -116,9 +122,9 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         spawnBite(particles, floaters, state.snake[0], cell, canvas, state.score, state.pendingGrow);
       }
 
-      ctx.clearRect(0, 0, width, width);
-      drawBoard(ctx, width, grid, cell);
-      drawEatFlash(ctx, width, now, state.ateAt);
+      ctx.clearRect(0, 0, width, height);
+      drawBoard(ctx, width, height, cols, rows, cell);
+      drawEatFlash(ctx, width, height, now, state.ateAt);
       drawFoods(ctx, state.foods, cell, now);
       stepFx(particles, floaters, dt);
 
@@ -145,7 +151,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       ticker = window.setInterval(() => {
         resumeAudio();
         advanceRef.current(performance.now());
-      }, liveRef.current.tickMs || 100);
+      }, liveRef.current.tickMs || BASE_TICK);
     };
 
     const stopWatching = onPageVisibility(syncLoop);
@@ -182,7 +188,11 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
   }, [liveRef]);
 
   return (
-    <div ref={wrapRef} className="relative aspect-square w-full">
+    <div
+      ref={wrapRef}
+      className="relative w-full"
+      style={{ aspectRatio: `${liveRef.current.cols} / ${liveRef.current.rows}` }}
+    >
       <canvas
         ref={canvasRef}
         className="h-full w-full rounded-[1.2rem]"
@@ -203,16 +213,18 @@ function facingFrom(from: Point | undefined, to: Point | undefined, fallback: Di
 
 function drawBoard(
   ctx: CanvasRenderingContext2D,
-  size: number,
-  grid: number,
+  width: number,
+  height: number,
+  cols: number,
+  rows: number,
   cell: number,
 ) {
   ctx.save();
-  roundRect(ctx, 0, 0, size, size, 18);
+  roundRect(ctx, 0, 0, width, height, 18);
   ctx.clip();
 
-  for (let y = 0; y < grid; y += 1) {
-    for (let x = 0; x < grid; x += 1) {
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
       ctx.fillStyle = (x + y) % 2 === 0 ? COLORS.cellA : COLORS.cellB;
       ctx.fillRect(x * cell, y * cell, cell + 1, cell + 1);
     }
@@ -223,7 +235,8 @@ function drawBoard(
 
 function drawEatFlash(
   ctx: CanvasRenderingContext2D,
-  size: number,
+  width: number,
+  height: number,
   now: number,
   ateAt: number,
 ) {
@@ -231,7 +244,7 @@ function drawEatFlash(
   const t = 1 - Math.min(1, (now - ateAt) / 220);
   if (t <= 0) return;
   ctx.fillStyle = `rgba(255, 248, 231, ${0.28 * t})`;
-  roundRect(ctx, 0, 0, size, size, 18);
+  roundRect(ctx, 0, 0, width, height, 18);
   ctx.fill();
 }
 

@@ -7,7 +7,7 @@ import { RotateCcw } from "lucide-react";
 import { GameBoard } from "@/components/GameBoard";
 import { GiftTestBar } from "@/components/GiftTestBar";
 import { GiftToasts } from "@/components/GiftToasts";
-import { KeyPad, SIDE_RAIL_CLASS } from "@/components/KeyPad";
+import { KeyPad, SIDE_RAIL_CLASS, SideRailSlot } from "@/components/KeyPad";
 import { PixelApple, PixelSkull, SnakeMascot } from "@/components/SnakeMascot";
 import { useHighScores } from "@/hooks/useHighScores";
 import { useSessionStats } from "@/hooks/useSessionStats";
@@ -26,7 +26,8 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
   const { scores, record } = useHighScores();
   const session = useSessionStats();
   const { liveRef, ui, heldKey, start, reset, togglePause, steer, advance } = useSnakeGame(
-    preset.size,
+    preset.cols,
+    preset.rows,
     enabled,
     (score) => record(gridId, score),
   );
@@ -119,7 +120,7 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
           />
         </div>
         <div
-          className={`board-frame relative min-w-0 w-[min(32rem,56dvh)] max-w-[calc(100%-22.5rem)] ${
+          className={`board-frame relative min-w-0 w-[min(32rem,calc(100%-22.5rem))] ${
             ui.status === "over" ? "board-shake" : ""
           }`}
         >
@@ -169,9 +170,9 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
             )}
           </AnimatePresence>
         </div>
-        <div className={SIDE_RAIL_CLASS}>
+        <SideRailSlot>
           <GiftToasts />
-        </div>
+        </SideRailSlot>
       </section>
     </div>
   );

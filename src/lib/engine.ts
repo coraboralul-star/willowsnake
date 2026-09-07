@@ -8,14 +8,15 @@ export type GridId = "compact" | "classic" | "broad";
 export type GridPreset = {
   id: GridId;
   label: string;
-  size: number;
+  cols: number;
+  rows: number;
   hint: string;
 };
 
 export const GRID_PRESETS: GridPreset[] = [
-  { id: "compact", label: "Compact", size: 12, hint: "12 × 12" },
-  { id: "classic", label: "Classic", size: 16, hint: "16 × 16" },
-  { id: "broad", label: "Broad", size: 20, hint: "20 × 20" },
+  { id: "compact", label: "Compact", cols: 12, rows: 16, hint: "12 × 16" },
+  { id: "classic", label: "Classic", cols: 16, rows: 20, hint: "16 × 20" },
+  { id: "broad", label: "Broad", cols: 20, rows: 24, hint: "20 × 24" },
 ];
 
 export const KEY_TO_DIR: Record<string, Direction> = {
@@ -33,6 +34,8 @@ export type FoodKind = "apple" | "golden" | "heart";
 export type Food = Point & { kind: FoodKind; from?: string };
 
 export type GameState = {
+  cols: number;
+  rows: number;
   gridSize: number;
   snake: Point[];
   prevSnake: Point[];
@@ -68,13 +71,13 @@ export const OPPOSITE: Record<Direction, Direction> = {
   right: "left",
 };
 
-export const BASE_TICK = 100;
+export const BASE_TICK = 114;
 export const MIN_TICK = 55;
 export const NITRO_TICK = 55;
 export const SLOW_TICK = 180;
 
-export function foodTarget(gridSize: number) {
-  return 9 + (gridSize - 12);
+export function foodTarget(cols: number, rows: number) {
+  return 9 + (cols - 12) + Math.floor((rows - cols) / 2);
 }
 
 function dirOf(from: Point, to: Point): Direction {
@@ -104,12 +107,12 @@ function wouldBunch(foods: Point[], cell: Point) {
   return false;
 }
 
-export function createGame(gridSize: number): GameState {
-  const cycleNext = generateCycleNext(gridSize);
-  const prev = cyclePrev(cycleNext, gridSize);
+export function createGame(cols: number, rows = cols): GameState {
+  const cycleNext = generateCycleNext(cols, rows);
+  const prev = cyclePrev(cycleNext, cols, rows);
   const head = {
-    x: Math.floor(Math.random() * gridSize),
-    y: Math.floor(Math.random() * gridSize),
+    x: Math.floor(Math.random() * cols),
+    y: Math.floor(Math.random() * rows),
   };
   const neck = prev[head.y][head.x];
   const tail = prev[neck.y][neck.x];
@@ -117,14 +120,16 @@ export function createGame(gridSize: number): GameState {
   const direction = dirOf(head, cycleNext[head.y][head.x]);
 
   return {
-    gridSize,
+    cols,
+    rows,
+    gridSize: cols,
     snake,
     prevSnake: snake.map((p) => ({ ...p })),
     direction,
     queued: [],
-    foods: spawnFoods(snake, [], gridSize),
+    foods: spawnFoods(snake, [], cols, rows),
     cycleNext,
-    cycleIndex: cycleIndex(cycleNext, gridSize),
+    cycleIndex: cycleIndex(cycleNext, cols, rows),
     score: 0,
     status: "idle",
     tickStartedAt: 0,
@@ -168,8 +173,8 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
   if (
     nextHead.x < 0 ||
     nextHead.y < 0 ||
-    nextHead.x >= state.gridSize ||
-    nextHead.y >= state.gridSize
+    nextHead.x >= state.cols ||
+    nextHead.y >= state.rows
   ) {
     return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
   }
@@ -192,12 +197,13 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     snake.pop();
   }
 
-  const filled = snake.length >= state.gridSize * state.gridSize;
+  const filled = snake.length >= state.cols * state.rows;
   const foods = eating
     ? spawnFoods(
         snake,
         state.foods.filter((food) => food.x !== nextHead.x || food.y !== nextHead.y),
-        state.gridSize,
+        state.cols,
+        state.rows,
       )
     : state.foods;
 
@@ -244,16 +250,16 @@ export function spinePath(prev: Point[], curr: Point[], t: number): Point[] {
   return ribbonPath(prev, curr, t);
 }
 
-export function spawnFoods(snake: Point[], foods: Food[], gridSize: number): Food[] {
-  const target = Math.min(foodTarget(gridSize), gridSize * gridSize - snake.length);
+export function spawnFoods(snake: Point[], foods: Food[], cols: number, rows: number): Food[] {
+  const target = Math.min(foodTarget(cols, rows), cols * rows - snake.length);
   const taken = new Set([...snake, ...foods].map(foodKey));
   const result: Food[] = foods.map((food) => ({ ...food }));
 
   while (result.length < target) {
     const spaced: Point[] = [];
     const any: Point[] = [];
-    for (let y = 0; y < gridSize; y += 1) {
-      for (let x = 0; x < gridSize; x += 1) {
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
         if (taken.has(`${x},${y}`)) continue;
         const cell = { x, y };
         any.push(cell);
@@ -270,8 +276,8 @@ export function spawnFoods(snake: Point[], foods: Food[], gridSize: number): Foo
   return result;
 }
 
-export function spawnFood(snake: Point[], gridSize: number): Food {
-  return spawnFoods(snake, [], gridSize)[0] ?? { ...snake[0], kind: "apple" };
+export function spawnFood(snake: Point[], cols: number, rows = cols): Food {
+  return spawnFoods(snake, [], cols, rows)[0] ?? { ...snake[0], kind: "apple" };
 }
 
 type GiftDrop = {
@@ -286,8 +292,8 @@ type GiftDrop = {
 function emptyCells(state: GameState) {
   const taken = new Set([...state.snake, ...state.foods].map(foodKey));
   const empty: Point[] = [];
-  for (let y = 0; y < state.gridSize; y += 1) {
-    for (let x = 0; x < state.gridSize; x += 1) {
+  for (let y = 0; y < state.rows; y += 1) {
+    for (let x = 0; x < state.cols; x += 1) {
       if (!taken.has(`${x},${y}`)) empty.push({ x, y });
     }
   }

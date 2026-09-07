@@ -12,7 +12,7 @@ export function enableAutoplay() {
   autoplayOn = true;
 }
 
-export function autoplayOnNewRun(_tickMs = 100) {}
+export function autoplayOnNewRun(_tickMs = 114) {}
 
 function dirBetween(from: Point, to: Point): Direction | null {
   const dx = to.x - from.x;

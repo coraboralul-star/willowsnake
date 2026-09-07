@@ -21,8 +21,8 @@ function offset(order: Point[], ox: number, oy: number): Point[] {
   return order.map((p) => ({ x: p.x + ox, y: p.y + oy }));
 }
 
-function indexOf(order: Point[], n: number) {
-  const index = Array.from({ length: n }, () => Array<number>(n).fill(-1));
+function indexOf(order: Point[], w: number, h: number) {
+  const index = Array.from({ length: h }, () => Array<number>(w).fill(-1));
   for (let i = 0; i < order.length; i += 1) {
     const p = order[i];
     index[p.y][p.x] = i;
@@ -30,8 +30,8 @@ function indexOf(order: Point[], n: number) {
   return index;
 }
 
-function toNext(order: Point[], n: number) {
-  const next = Array.from({ length: n }, () => Array<Point>(n));
+function toNext(order: Point[], w: number, h: number) {
+  const next = Array.from({ length: h }, () => Array<Point>(w));
   for (let i = 0; i < order.length; i += 1) {
     const a = order[i];
     next[a.y][a.x] = order[nextI(i, order.length)];
@@ -39,8 +39,8 @@ function toNext(order: Point[], n: number) {
   return next;
 }
 
-function toPrev(order: Point[], n: number) {
-  const prev = Array.from({ length: n }, () => Array<Point>(n));
+function toPrev(order: Point[], w: number, h: number) {
+  const prev = Array.from({ length: h }, () => Array<Point>(w));
   for (let i = 0; i < order.length; i += 1) {
     const a = order[i];
     const b = order[nextI(i, order.length)];
@@ -124,15 +124,16 @@ function rectRing(w: number, h: number, k: number): Point[] {
 function spliceCycles(
   a: Point[],
   b: Point[],
-  n: number,
+  w: number,
+  h: number,
   p: Point,
   p2: Point,
   q: Point,
   endB: Point,
   walkB: "prev" | "next",
 ) {
-  const nextA = toNext(a, n);
-  const stepB = walkB === "prev" ? toPrev(b, n) : toNext(b, n);
+  const nextA = toNext(a, w, h);
+  const stepB = walkB === "prev" ? toPrev(b, w, h) : toNext(b, w, h);
   const out: Point[] = [p];
   let cur = q;
   for (let k = 0; k < b.length; k += 1) {
@@ -153,10 +154,10 @@ function spliceCycles(
   return out;
 }
 
-function mergeCycles(a: Point[], b: Point[], n: number): Point[] | null {
-  const nextB = toNext(b, n);
-  const prevB = toPrev(b, n);
-  const idxB = indexOf(b, n);
+function mergeCycles(a: Point[], b: Point[], w: number, h: number): Point[] | null {
+  const nextB = toNext(b, w, h);
+  const prevB = toPrev(b, w, h);
+  const idxB = indexOf(b, w, h);
   const spots: {
     p: Point;
     p2: Point;
@@ -175,7 +176,7 @@ function mergeCycles(a: Point[], b: Point[], n: number): Point[] | null {
       { x: p.x, y: p.y - 1 },
     ];
     for (const q of neighbors) {
-      if (q.x < 0 || q.y < 0 || q.x >= n || q.y >= n) continue;
+      if (q.x < 0 || q.y < 0 || q.x >= w || q.y >= h) continue;
       if (idxB[q.y][q.x] < 0) continue;
       const qNext = nextB[q.y][q.x];
       const qPrev = prevB[q.y][q.x];
@@ -192,7 +193,7 @@ function mergeCycles(a: Point[], b: Point[], n: number): Point[] | null {
   let best: Point[] | null = null;
   let bestScore = -Infinity;
   for (const spot of spots) {
-    const merged = spliceCycles(a, b, n, spot.p, spot.p2, spot.q, spot.endB, spot.walkB);
+    const merged = spliceCycles(a, b, w, h, spot.p, spot.p2, spot.q, spot.endB, spot.walkB);
     if (!merged) continue;
     const { turns, maxRun } = cycleStats(merged);
     const score = turns * 3 - maxRun * maxRun * 8;
@@ -204,18 +205,18 @@ function mergeCycles(a: Point[], b: Point[], n: number): Point[] | null {
   return best;
 }
 
-function joinPath(parts: Point[][], n: number): Point[] | null {
+function joinPath(parts: Point[][], w: number, h: number): Point[] | null {
   if (parts.length === 0) return null;
   let acc = parts[0];
   for (let i = 1; i < parts.length; i += 1) {
-    const merged = mergeCycles(acc, parts[i], n) ?? mergeCycles(parts[i], acc, n);
-    if (!merged) return joinAll(parts, n);
+    const merged = mergeCycles(acc, parts[i], w, h) ?? mergeCycles(parts[i], acc, w, h);
+    if (!merged) return joinAll(parts, w, h);
     acc = merged;
   }
   return acc;
 }
 
-function joinAll(parts: Point[][], n: number): Point[] | null {
+function joinAll(parts: Point[][], w: number, h: number): Point[] | null {
   if (parts.length === 0) return null;
   let acc = parts[0];
   const rest = parts.slice(1);
@@ -223,7 +224,7 @@ function joinAll(parts: Point[][], n: number): Point[] | null {
     let found = -1;
     let merged: Point[] | null = null;
     for (let i = 0; i < rest.length; i += 1) {
-      merged = mergeCycles(acc, rest[i], n) ?? mergeCycles(rest[i], acc, n);
+      merged = mergeCycles(acc, rest[i], w, h) ?? mergeCycles(rest[i], acc, w, h);
       if (merged) {
         found = i;
         break;
@@ -241,7 +242,7 @@ function nestedRings(w: number, h: number): Point[] {
   let cycle = rectRing(w, h, 0);
   for (let k = 1; k < layers; k += 1) {
     const inner = rectRing(w, h, k);
-    const merged = mergeCycles(cycle, inner, Math.max(w, h));
+    const merged = mergeCycles(cycle, inner, w, h);
     if (!merged) return Math.random() < 0.5 ? serpentine(w, h) : rowSerpentine(w, h);
     cycle = merged;
   }
@@ -360,7 +361,7 @@ function mazeFill(w: number, h: number, weave: Weave = "rows"): Point[] | null {
     const flip = (tile.x + tile.y) % 2 === 1;
     return offset(twoByTwo(flip), tile.x * 2, tile.y * 2);
   });
-  const joined = joinPath(tiles, Math.max(w, h));
+  const joined = joinPath(tiles, w, h);
   if (joined && isSimpleCycle(joined) && joined.length === w * h) return joined;
   return null;
 }
@@ -382,8 +383,8 @@ function twoOpt(order: Point[], i: number, k: number): Point[] {
   return out;
 }
 
-function flipSquare(order: Point[], n: number, x: number, y: number): Point[] | null {
-  const idx = indexOf(order, n);
+function flipSquare(order: Point[], w: number, h: number, x: number, y: number): Point[] | null {
+  const idx = indexOf(order, w, h);
   const len = order.length;
   const A = idx[y][x];
   const B = idx[y][x + 1];
@@ -405,38 +406,33 @@ function flipSquare(order: Point[], n: number, x: number, y: number): Point[] | 
   return null;
 }
 
-function spice(order: Point[], n: number): Point[] {
+function spice(order: Point[], w: number, h: number): Point[] {
   let cur = order;
   const tries = 4 + Math.floor(Math.random() * 5);
   for (let i = 0; i < tries; i += 1) {
     const next = flipSquare(
       cur,
-      n,
-      Math.floor(Math.random() * (n - 1)),
-      Math.floor(Math.random() * (n - 1)),
+      w,
+      h,
+      Math.floor(Math.random() * Math.max(1, w - 1)),
+      Math.floor(Math.random() * Math.max(1, h - 1)),
     );
     if (next) cur = next;
   }
   return cur;
 }
 
-function dihedral(order: Point[], n: number, rot: number, mirror: boolean): Point[] {
-  return order.map((p) => {
-    let x = p.x;
-    let y = p.y;
-    if (mirror) x = n - 1 - x;
-    for (let i = 0; i < rot; i += 1) {
-      const nx = n - 1 - y;
-      const ny = x;
-      x = nx;
-      y = ny;
-    }
-    return { x, y };
-  });
+function orient(order: Point[], w: number, h: number): Point[] {
+  const flipX = Math.random() < 0.5;
+  const flipY = Math.random() < 0.5;
+  return order.map((p) => ({
+    x: flipX ? w - 1 - p.x : p.x,
+    y: flipY ? h - 1 - p.y : p.y,
+  }));
 }
 
-function isBoardCycle(order: Point[], n: number) {
-  return order.length === n * n && isSimpleCycle(order);
+function isBoardCycle(order: Point[], w: number, h: number) {
+  return order.length === w * h && isSimpleCycle(order);
 }
 
 function cycleStats(order: Point[]) {
@@ -463,8 +459,9 @@ function cycleStats(order: Point[]) {
   return { turns, maxRun };
 }
 
-function sojourn(order: Point[], n: number) {
-  const mid = n / 2;
+function sojourn(order: Point[], w: number, h: number) {
+  const midX = w / 2;
+  const midY = h / 2;
   const runOf = (side: (p: Point) => boolean) => {
     let best = 1;
     let cur = 1;
@@ -478,82 +475,84 @@ function sojourn(order: Point[], n: number) {
     return Math.max(best, cur);
   };
   return Math.max(
-    runOf((p) => p.y < mid),
-    runOf((p) => p.x < mid),
+    runOf((p) => p.y < midY),
+    runOf((p) => p.x < midX),
   );
 }
 
-function wildScore(order: Point[], n: number) {
+function wildScore(order: Point[], w: number, h: number) {
   const { turns, maxRun } = cycleStats(order);
-  return turns * 2 - maxRun * maxRun * 10 - sojourn(order, n) * 4;
+  return turns * 2 - maxRun * maxRun * 10 - sojourn(order, w, h) * 4;
 }
 
-function columnBands(n: number): Point[] | null {
-  if (n % 4 !== 0) return null;
+function columnBands(w: number, h: number): Point[] | null {
+  if (w % 4 !== 0) return null;
   const bands: Point[][] = [];
-  for (let x = 0; x < n; x += 4) {
-    const fill = mazeFill(4, n, "rows");
+  for (let x = 0; x < w; x += 4) {
+    const fill = mazeFill(4, h, "rows");
     if (!fill) return null;
     bands.push(offset(fill, x, 0));
   }
-  const joined = joinPath(bands, n);
-  if (joined && isSimpleCycle(joined) && joined.length === n * n) return joined;
+  const joined = joinPath(bands, w, h);
+  if (joined && isSimpleCycle(joined) && joined.length === w * h) return joined;
   return null;
 }
 
-function rowBands(n: number): Point[] | null {
-  if (n % 4 !== 0) return null;
+function rowBands(w: number, h: number): Point[] | null {
+  if (h % 4 !== 0) return null;
   const bands: Point[][] = [];
-  for (let y = 0; y < n; y += 4) {
-    const fill = mazeFill(n, 4, "cols");
+  for (let y = 0; y < h; y += 4) {
+    const fill = mazeFill(w, 4, "cols");
     if (!fill) return null;
     bands.push(offset(fill, 0, y));
   }
-  const joined = joinPath(bands, n);
-  if (joined && isSimpleCycle(joined) && joined.length === n * n) return joined;
+  const joined = joinPath(bands, w, h);
+  if (joined && isSimpleCycle(joined) && joined.length === w * h) return joined;
   return null;
 }
 
-function buildPattern(n: number): Point[] {
+function buildPattern(w: number, h: number): Point[] {
   const choices: Point[][] = [];
-  const cols = columnBands(n);
+  const cols = columnBands(w, h);
   if (cols) choices.push(cols);
-  const rows = rowBands(n);
+  const rows = rowBands(w, h);
   if (rows) choices.push(rows);
-  if (isPow2(n / 2)) {
-    const hilbert = mazeFill(n, n, "hilbert");
+  if (w === h && isPow2(w / 2)) {
+    const hilbert = mazeFill(w, h, "hilbert");
     if (hilbert) choices.push(hilbert);
   }
   if (choices.length) return pick(choices);
-  const maze = mazeFill(n, n, "rows");
-  if (maze && isBoardCycle(maze, n)) return maze;
-  const spiral = nestedRings(n, n);
-  if (isBoardCycle(spiral, n)) return spiral;
-  return serpentine(n, n);
+  const maze = mazeFill(w, h, "rows");
+  if (maze && isBoardCycle(maze, w, h)) return maze;
+  const spiral = nestedRings(w, h);
+  if (isBoardCycle(spiral, w, h)) return spiral;
+  return serpentine(w, h);
 }
 
-export function generateCycleNext(n: number): Point[][] {
+export function generateCycleNext(w: number, h = w): Point[][] {
   const candidates: Point[][] = [];
   for (let i = 0; i < 5; i += 1) {
-    let order = buildPattern(n);
-    if (!isBoardCycle(order, n)) continue;
-    order = spice(order, n);
-    if (!isBoardCycle(order, n)) continue;
+    let order = buildPattern(w, h);
+    if (!isBoardCycle(order, w, h)) continue;
+    order = spice(order, w, h);
+    if (!isBoardCycle(order, w, h)) continue;
     candidates.push(order);
   }
 
   let order = candidates.length
-    ? candidates.reduce((best, cur) => (wildScore(cur, n) > wildScore(best, n) ? cur : best))
-    : nestedRings(n, n);
+    ? candidates.reduce((best, cur) =>
+        wildScore(cur, w, h) > wildScore(best, w, h) ? cur : best,
+      )
+    : nestedRings(w, h);
 
-  if (!isBoardCycle(order, n)) order = nestedRings(n, n);
-  if (!isBoardCycle(order, n)) order = serpentine(n, n);
+  if (!isBoardCycle(order, w, h)) order = nestedRings(w, h);
+  if (!isBoardCycle(order, w, h)) order = serpentine(w, h);
 
-  order = dihedral(order, n, Math.floor(Math.random() * 4), Math.random() < 0.5);
-  if (!isBoardCycle(order, n)) order = nestedRings(n, n);
-  if (!isBoardCycle(order, n)) order = serpentine(n, n);
+  order = orient(order, w, h);
+  if (!isBoardCycle(order, w, h)) order = nestedRings(w, h);
+  if (!isBoardCycle(order, w, h)) order = serpentine(w, h);
 
-  const next = Array.from({ length: n }, () => Array<Point>(n));
+  const next = Array.from({ length: h }, () => Array<Point>(w));
   for (let i = 0; i < order.length; i += 1) {
     const a = order[i];
     const b = order[nextI(i, order.length)];
@@ -562,10 +561,10 @@ export function generateCycleNext(n: number): Point[][] {
   return next;
 }
 
-export function cyclePrev(next: Point[][], n: number): Point[][] {
-  const prev = Array.from({ length: n }, () => Array<Point>(n));
-  for (let y = 0; y < n; y += 1) {
-    for (let x = 0; x < n; x += 1) {
+export function cyclePrev(next: Point[][], w: number, h = w): Point[][] {
+  const prev = Array.from({ length: h }, () => Array<Point>(w));
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
       const nxt = next[y][x];
       prev[nxt.y][nxt.x] = { x, y };
     }
@@ -573,10 +572,10 @@ export function cyclePrev(next: Point[][], n: number): Point[][] {
   return prev;
 }
 
-export function cycleIndex(next: Point[][], n: number): number[][] {
-  const index = Array.from({ length: n }, () => Array<number>(n).fill(-1));
+export function cycleIndex(next: Point[][], w: number, h = w): number[][] {
+  const index = Array.from({ length: h }, () => Array<number>(w).fill(-1));
   let p = { x: 0, y: 0 };
-  for (let i = 0; i < n * n; i += 1) {
+  for (let i = 0; i < w * h; i += 1) {
     index[p.y][p.x] = i;
     p = next[p.y][p.x];
   }
