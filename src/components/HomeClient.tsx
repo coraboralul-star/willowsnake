@@ -5,11 +5,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArcadeBackdrop } from "@/components/ArcadeBackdrop";
 import { GameApp } from "@/components/GameApp";
 import { Loader } from "@/components/Loader";
-import type { GridId } from "@/lib/engine";
 
 export function HomeClient() {
   const [ready, setReady] = useState(false);
-  const [gridId, setGridId] = useState<GridId>("classic");
   const onDone = useCallback(() => setReady(true), []);
 
   return (
@@ -22,7 +20,7 @@ export function HomeClient() {
         animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 10 }}
         transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
       >
-        <GameApp key={gridId} gridId={gridId} onGridId={setGridId} enabled={ready} />
+        <GameApp enabled={ready} />
       </motion.div>
     </main>
   );

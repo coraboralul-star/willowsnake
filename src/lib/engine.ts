@@ -3,21 +3,8 @@ import { cycleIndex, cyclePrev, generateCycleNext } from "@/lib/hamilton";
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
 export type GameStatus = "idle" | "playing" | "paused" | "over" | "won";
-export type GridId = "compact" | "classic" | "broad";
-
-export type GridPreset = {
-  id: GridId;
-  label: string;
-  cols: number;
-  rows: number;
-  hint: string;
-};
-
-export const GRID_PRESETS: GridPreset[] = [
-  { id: "compact", label: "Compact", cols: 12, rows: 16, hint: "12 × 16" },
-  { id: "classic", label: "Classic", cols: 16, rows: 20, hint: "16 × 20" },
-  { id: "broad", label: "Broad", cols: 20, rows: 24, hint: "20 × 24" },
-];
+export const BOARD_COLS = 20;
+export const BOARD_ROWS = 26;
 
 export const KEY_TO_DIR: Record<string, Direction> = {
   w: "up",
@@ -319,7 +306,9 @@ function takeCells(state: GameState, count: number) {
 }
 
 export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: string): GameState {
-  if (state.status !== "playing" && state.status !== "paused") return state;
+  if (state.status !== "playing" && state.status !== "paused" && state.status !== "idle") {
+    return state;
+  }
   let next: GameState = { ...state, foods: state.foods.map((food) => ({ ...food })) };
   const add = (kind: FoodKind, count: number) => {
     const cells = takeCells(next, count);

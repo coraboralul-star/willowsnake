@@ -4,17 +4,21 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "tiktok": "node --experimental-strip-types scripts/tiktok-bridge.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
+    "dotenv": "^17.4.2",
     "lucide-react": "^1.39.0",
     "motion": "^13.1.1",
     "next": "16.3.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "tiktok-live-connector": "^2.4.4",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -22,9 +26,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

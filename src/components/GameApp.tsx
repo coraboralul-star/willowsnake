@@ -12,33 +12,33 @@ import { PixelApple, PixelSkull, SnakeMascot } from "@/components/SnakeMascot";
 import { useHighScores } from "@/hooks/useHighScores";
 import { useSessionStats } from "@/hooks/useSessionStats";
 import { useSnakeGame } from "@/hooks/useSnakeGame";
-import { GRID_PRESETS, type GridId } from "@/lib/engine";
+import { BOARD_COLS, BOARD_ROWS } from "@/lib/engine";
 import { isGiftTestMode } from "@/lib/gifts";
+import { connectTikTokLive, type TikTokBridgeStatus } from "@/lib/tiktokLive";
 
 type GameAppProps = {
-  gridId: GridId;
-  onGridId: (id: GridId) => void;
   enabled: boolean;
 };
 
-export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
-  const preset = GRID_PRESETS.find((item) => item.id === gridId) ?? GRID_PRESETS[1];
-  const { scores, record } = useHighScores();
+export function GameApp({ enabled }: GameAppProps) {
+  const { best, record } = useHighScores();
   const session = useSessionStats();
   const { liveRef, ui, heldKey, start, reset, togglePause, steer, advance } = useSnakeGame(
-    preset.cols,
-    preset.rows,
+    BOARD_COLS,
+    BOARD_ROWS,
     enabled,
-    (score) => record(gridId, score),
+    record,
   );
   const [giftTest, setGiftTest] = useState(false);
-  const best = scores[gridId] ?? 0;
+  const [tiktok, setTiktok] = useState<TikTokBridgeStatus | null>(null);
   const liveBest = Math.max(best, ui.score);
   const isNewBest = ui.score > 0 && ui.score >= liveBest && ui.score > (best || 0);
   const overlay = ui.status === "over" || ui.status === "won" || ui.status === "paused";
 
   useEffect(() => {
     setGiftTest(isGiftTestMode());
+    const handle = connectTikTokLive({ onStatus: setTiktok });
+    return () => handle.disconnect();
   }, []);
 
   return (
@@ -98,27 +98,16 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
         <span className="mx-2 text-ink-soft">·</span>
         {session.wins} wins
       </p>
+      {tiktok && (
+        <p className="relative z-10 text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-ink-soft">
+          TikTok
+          <span className="mx-2">·</span>
+          {tiktok.connected ? "live" : "waiting"}
+          {tiktok.message ? <span className="ml-2 opacity-70">{tiktok.message}</span> : null}
+        </p>
+      )}
 
       {giftTest && <GiftTestBar />}
-
-      <div className="relative z-10 flex flex-wrap justify-center gap-2">
-        {GRID_PRESETS.map((item) => {
-          const selected = item.id === gridId;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onGridId(item.id)}
-              className={`rounded-lg px-3 py-2 text-sm font-bold transition ${
-                selected ? "bg-sage text-cream shadow-soft" : "bg-cream/80 text-ink hover:bg-cream"
-              }`}
-            >
-              {item.label}
-              <span className="ml-2 opacity-70">{item.hint}</span>
-            </button>
-          );
-        })}
-      </div>
 
       <section className="relative z-10 flex w-full flex-row items-center justify-center gap-3">
         <div className={SIDE_RAIL_CLASS}>

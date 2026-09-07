@@ -1,29 +1,25 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import type { GridId } from "@/lib/engine";
 
 const STORAGE_KEY = "willow-snake-best";
 const EVENT = "willow-scores";
 
-type ScoreMap = Partial<Record<GridId, number>>;
-
 export function useHighScores() {
   const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const scores = parseScores(raw);
+  const best = parseBest(raw);
 
-  const record = useCallback((gridId: GridId, score: number) => {
-    const current = parseScores(getSnapshot());
-    const next = { ...current, [gridId]: Math.max(current[gridId] ?? 0, score) };
+  const record = useCallback((score: number) => {
+    const next = Math.max(parseBest(getSnapshot()), score);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ board: next }));
       window.dispatchEvent(new Event(EVENT));
     } catch {
       // Ignore private-mode write failures.
     }
   }, []);
 
-  return { scores, record };
+  return { best, record };
 }
 
 function subscribe(onStoreChange: () => void) {
@@ -47,10 +43,18 @@ function getServerSnapshot() {
   return "{}";
 }
 
-function parseScores(raw: string): ScoreMap {
+function parseBest(raw: string): number {
   try {
-    return JSON.parse(raw) as ScoreMap;
+    const data = JSON.parse(raw) as unknown;
+    if (typeof data === "number") return data;
+    if (data && typeof data === "object") {
+      return Math.max(
+        0,
+        ...Object.values(data as Record<string, unknown>).map((value) => Number(value) || 0),
+      );
+    }
   } catch {
-    return {};
+    // Ignore broken localStorage payloads.
   }
+  return 0;
 }
