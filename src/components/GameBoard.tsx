@@ -163,18 +163,20 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
           : alert.tone === "nitro"
             ? ["#29B6F6", "#FFF8E7", "#43A047"]
             : ["#E53935", "#43A047", "#F9A825", "#FFF8E7"];
-      confetti({
-        particleCount: alert.tone === "rose" ? 24 : 90,
-        spread: 72,
-        startVelocity: 32,
-        gravity: 0.85,
-        ticks: 180,
-        origin: {
-          x: (rect.left + rect.width / 2) / window.innerWidth,
-          y: (rect.top + rect.height * 0.35) / window.innerHeight,
-        },
-        colors: palette,
-      });
+      if (alert.tone !== "takeover") {
+        confetti({
+          particleCount: alert.tone === "rose" ? 24 : 90,
+          spread: 72,
+          startVelocity: 32,
+          gravity: 0.85,
+          ticks: 180,
+          origin: {
+            x: (rect.left + rect.width / 2) / window.innerWidth,
+            y: (rect.top + rect.height * 0.35) / window.innerHeight,
+          },
+          colors: palette,
+        });
+      }
     });
     syncLoop();
 

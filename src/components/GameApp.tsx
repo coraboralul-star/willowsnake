@@ -43,6 +43,17 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
 
   return (
     <div className="relative mx-auto flex w-full max-w-6xl flex-col items-center gap-3">
+      <AnimatePresence>
+        {ui.hijacked && (
+          <motion.div
+            className="pointer-events-none fixed inset-0 z-40 bg-zinc-950/55 backdrop-grayscale"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22 }}
+          />
+        )}
+      </AnimatePresence>
       <header className="relative z-10 flex w-full flex-col items-center text-center">
         <SnakeMascot className="h-16 w-32 sm:h-20 sm:w-40" />
         <p className="mt-1 text-[0.7rem] font-extrabold uppercase tracking-[0.28em] text-ink-soft">
@@ -120,9 +131,9 @@ export function GameApp({ gridId, onGridId, enabled }: GameAppProps) {
           />
         </div>
         <div
-          className={`board-frame relative min-w-0 w-[min(32rem,calc(100%-22.5rem))] ${
-            ui.status === "over" ? "board-shake" : ""
-          }`}
+          className={`board-frame relative min-w-0 w-[min(32rem,calc(100%-22.5rem))] transition-transform duration-300 ${
+            ui.hijacked ? "scale-[1.08]" : ""
+          } ${ui.status === "over" ? "board-shake" : ""}`}
         >
           <GameBoard liveRef={liveRef} advance={advance} />
           <AnimatePresence>

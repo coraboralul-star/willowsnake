@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyAutoplayDir,
+  applyHijackDir,
   autoplayOnNewRun,
   enableAutoplay,
   isAutoplay,
   pickAutoplayDir,
+  pickHijackDir,
 } from "@/lib/autoplay";
 import {
   applyGift,
@@ -36,6 +38,7 @@ export type GameUi = {
   status: GameStatus;
   length: number;
   gridSize: number;
+  hijacked: boolean;
 };
 
 const GAME_KEY: Record<string, GameKey> = {
@@ -78,6 +81,7 @@ export function useSnakeGame(
     status: "idle",
     length: 3,
     gridSize: cols,
+    hijacked: false,
   }));
   const [heldKey, setHeldKey] = useState<string | null>(null);
 
@@ -148,6 +152,7 @@ export function useSnakeGame(
 
   const togglePause = useCallback(() => {
     const current = liveRef.current;
+    if (current.hijacked) return;
     if (current.status === "playing") {
       if (!isAutoplay()) markDirty();
       keysRef.current?.reset();
@@ -172,7 +177,7 @@ export function useSnakeGame(
 
   const steer = useCallback(
     (dir: Direction) => {
-      if (isAutoplay()) return;
+      if (isAutoplay() || liveRef.current.hijacked) return;
       const now = performance.now();
       const current = liveRef.current;
       if (current.status === "idle") {
@@ -205,7 +210,9 @@ export function useSnakeGame(
     const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
     while (now - liveRef.current.tickStartedAt >= liveRef.current.tickMs) {
       let current = liveRef.current;
-      if (isAutoplay()) {
+      if (current.hijacked) {
+        current = applyHijackDir(current, pickHijackDir(current));
+      } else if (isAutoplay()) {
         const facing = current.queued.at(0) ?? current.direction;
         const dir = pickAutoplayDir(current);
         current = applyAutoplayDir(current, dir);
@@ -214,6 +221,7 @@ export function useSnakeGame(
 
       const next = step(current, now);
       next.tickStartedAt = current.tickStartedAt + current.tickMs;
+      if (next.status === "over" || next.status === "won") next.hijacked = false;
       liveRef.current = next;
       advanced = true;
 
@@ -239,7 +247,8 @@ export function useSnakeGame(
       setUi((prev) =>
         prev.score === snapshot.score &&
         prev.status === snapshot.status &&
-        prev.length === snapshot.length
+        prev.length === snapshot.length &&
+        prev.hijacked === snapshot.hijacked
           ? prev
           : snapshot,
       );
@@ -260,6 +269,10 @@ export function useSnakeGame(
     return onLiveGift((gift) => {
       const action = resolveGift(gift);
       liveRef.current = applyGift(liveRef.current, action, performance.now(), gift.user);
+      if (action.takeover) {
+        keysRef.current?.reset();
+        setHeldKey(null);
+      }
       pushLiveAlert({
         id: gift.id,
         user: gift.user,
@@ -360,5 +373,6 @@ function toUi(state: GameState): GameUi {
     status: state.status,
     length: state.snake.length,
     gridSize: state.gridSize,
+    hijacked: state.hijacked,
   };
 }

@@ -4,9 +4,10 @@ export type LiveGift = {
   id: string;
   user: string;
   coins: number;
+  count?: number;
 };
 
-export type GiftTone = "rose" | "rain" | "nitro" | "golden";
+export type GiftTone = "rose" | "rain" | "nitro" | "golden" | "takeover";
 
 export type GiftAction = {
   apples: number;
@@ -15,6 +16,7 @@ export type GiftAction = {
   nitroMs: number;
   slowMs: number;
   glowMs: number;
+  takeover: boolean;
   confetti: boolean;
   label: string;
   tone: GiftTone;
@@ -27,7 +29,14 @@ export type LiveAlert = {
   tone: GiftTone;
 };
 
-export const TEST_COINS = [1, 10, 50, 100] as const;
+export const TEST_DROPS: { coins: number; count: number; label: string }[] = [
+  { coins: 1, count: 1, label: "1" },
+  { coins: 1, count: 10, label: "10×1" },
+  { coins: 10, count: 1, label: "10" },
+  { coins: 50, count: 1, label: "50" },
+  { coins: 100, count: 1, label: "100" },
+  { coins: 999, count: 1, label: "999+" },
+];
 
 type GiftHandler = (gift: LiveGift) => void;
 type AlertHandler = (alert: LiveAlert) => void;
@@ -62,11 +71,12 @@ export function isGiftTestMode() {
   return new URLSearchParams(window.location.search).has("gifts");
 }
 
-export function testCoins(coins: number, user = "Test gifter") {
+export function testCoins(coins: number, count = 1, user = "Test gifter") {
   emitLiveGift({
-    id: `test-${coins}-${Date.now()}`,
+    id: `test-${coins}x${count}-${Date.now()}`,
     user,
     coins,
+    count,
   });
 }
 
@@ -78,6 +88,7 @@ function snack(label: string, tone: GiftTone, extra: Partial<GiftAction> = {}): 
     nitroMs: 0,
     slowMs: 0,
     glowMs: 0,
+    takeover: false,
     confetti: false,
     label,
     tone,
@@ -85,37 +96,44 @@ function snack(label: string, tone: GiftTone, extra: Partial<GiftAction> = {}): 
   };
 }
 
-function coinLabel(coins: number) {
-  return coins === 1 ? "1 coin" : `${coins} coins`;
+function coinLabel(coins: number, count: number) {
+  const unit = coins === 1 ? "1 coin" : `${coins} coins`;
+  if (count > 1) return `${count}×${unit}`;
+  return unit;
 }
 
 export function resolveGift(gift: LiveGift): GiftAction {
-  const coins = Math.max(0, gift.coins);
-  const label = coinLabel(coins);
+  const unit = Math.max(0, Math.floor(gift.coins));
+  const count = Math.max(1, Math.floor(gift.count ?? 1));
+  const label = unit >= 999 ? "Take over" : coinLabel(unit, count);
 
-  if (coins >= 100) {
+  if (unit >= 999) {
+    return snack(label, "takeover", { takeover: true });
+  }
+  if (unit >= 100) {
     return snack(label, "golden", {
-      golden: 1,
+      golden: count,
       glowMs: 7000,
       confetti: true,
     });
   }
-  if (coins >= 50) {
+  if (unit >= 50) {
     return snack(label, "nitro", {
-      apples: 1,
+      apples: count,
       nitroMs: 8000,
       glowMs: 8000,
     });
   }
-  if (coins >= 10) {
+  if (unit >= 10) {
+    const rain = Math.min(12, Math.max(5, Math.floor(unit / 2)));
     return snack(label, "rain", {
-      apples: Math.min(12, Math.max(5, Math.floor(coins / 2))),
+      apples: rain * count,
       glowMs: 2500,
       confetti: true,
     });
   }
   return snack(label, "rose", {
-    apples: coins > 0 ? 1 : 0,
-    glowMs: coins > 0 ? 1800 : 0,
+    apples: count,
+    glowMs: 1800,
   });
 }

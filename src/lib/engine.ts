@@ -55,6 +55,7 @@ export type GameState = {
   glowUntil: number;
   nitroUntil: number;
   slowUntil: number;
+  hijacked: boolean;
 };
 
 export const DELTA: Record<Direction, Point> = {
@@ -141,6 +142,7 @@ export function createGame(cols: number, rows = cols): GameState {
     glowUntil: 0,
     nitroUntil: 0,
     slowUntil: 0,
+    hijacked: false,
   };
 }
 
@@ -287,6 +289,7 @@ type GiftDrop = {
   nitroMs: number;
   slowMs: number;
   glowMs: number;
+  takeover: boolean;
 };
 
 function emptyCells(state: GameState) {
@@ -344,6 +347,13 @@ export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: 
     next = {
       ...next,
       glowUntil: Math.max(next.glowUntil, now) + drop.glowMs,
+    };
+  }
+  if (drop.takeover) {
+    next = {
+      ...next,
+      hijacked: true,
+      status: next.status === "paused" ? "playing" : next.status,
     };
   }
   return { ...next, foodAt: now };

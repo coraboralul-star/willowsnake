@@ -1,6 +1,6 @@
 "use client";
 
-import { OPPOSITE, type Direction, type GameState, type Point } from "@/lib/engine";
+import { DELTA, OPPOSITE, type Direction, type GameState, type Point } from "@/lib/engine";
 
 let autoplayOn = false;
 
@@ -37,6 +37,28 @@ export function applyAutoplayDir(state: GameState, dir: Direction): GameState {
     return { ...state, queued: [] };
   }
   return { ...state, queued: [dir] };
+}
+
+export function applyHijackDir(state: GameState, dir: Direction): GameState {
+  return { ...state, queued: [], direction: dir };
+}
+
+const HIJACK_DIRS: Direction[] = ["up", "down", "left", "right"];
+
+function isDeadly(state: GameState, dir: Direction) {
+  const head = state.snake[0];
+  const next = { x: head.x + DELTA[dir].x, y: head.y + DELTA[dir].y };
+  if (next.x < 0 || next.y < 0 || next.x >= state.cols || next.y >= state.rows) return true;
+  return state.snake.some((part) => part.x === next.x && part.y === next.y);
+}
+
+export function pickHijackDir(state: GameState): Direction {
+  if (Math.random() < 0.01) {
+    const deadly = HIJACK_DIRS.filter((dir) => isDeadly(state, dir));
+    if (deadly.length > 0) return deadly[Math.floor(Math.random() * deadly.length)];
+  }
+  const wander = HIJACK_DIRS.filter((dir) => dir !== OPPOSITE[state.direction]);
+  return wander[Math.floor(Math.random() * wander.length)] ?? state.direction;
 }
 
 export const DIR_TO_KEY = {

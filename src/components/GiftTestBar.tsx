@@ -1,7 +1,7 @@
 "use client";
 
 import { Gift } from "lucide-react";
-import { TEST_COINS, testCoins } from "@/lib/gifts";
+import { TEST_DROPS, testCoins } from "@/lib/gifts";
 
 export function GiftTestBar() {
   return (
@@ -9,15 +9,15 @@ export function GiftTestBar() {
       <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-ink-soft">
         Coin test
       </p>
-      {TEST_COINS.map((coins) => (
+      {TEST_DROPS.map((drop) => (
         <button
-          key={coins}
+          key={drop.label}
           type="button"
           className="btn-primary !py-1.5 !text-[0.65rem]"
-          onClick={() => testCoins(coins)}
+          onClick={() => testCoins(drop.coins, drop.count)}
         >
           <Gift className="h-3.5 w-3.5" />
-          {coins}
+          {drop.label}
         </button>
       ))}
     </div>

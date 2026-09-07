@@ -13,6 +13,6 @@ export async function connectTikTokLive(
   void uniqueId;
   void onGift;
   throw new Error(
-    "TikTok Live is not wired yet. Open ?gifts=1 and send test coin amounts, then swap this function for a livestream connector that calls emitLiveGift().",
+    "TikTok Live is not wired yet. Open ?gifts=1 and send test coin amounts. Pass coins as the value of one gift and count as how many were sent together, then call emitLiveGift().",
   );
 }

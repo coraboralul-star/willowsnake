@@ -36,5 +36,6 @@ function toneClass(tone: LiveAlert["tone"]) {
   if (tone === "golden") return "bg-[#F9A825] text-[#3E2A00]";
   if (tone === "nitro") return "bg-[#29B6F6] text-[#083344]";
   if (tone === "rain") return "bg-[#E53935] text-cream";
+  if (tone === "takeover") return "bg-zinc-800 text-cream";
   return "bg-cream text-ink";
 }
