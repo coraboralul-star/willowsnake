@@ -100,39 +100,25 @@ function wouldBunch(foods: Point[], cell: Point) {
   return false;
 }
 
-function densestFood(foods: Food[]) {
-  if (foods.length === 0) return null;
-  let best = foods[0];
-  let bestCount = -1;
-  for (const food of foods) {
-    const count = foods.filter(
-      (other) => Math.abs(food.x - other.x) + Math.abs(food.y - other.y) <= 4,
-    ).length;
-    if (count > bestCount) {
-      best = food;
-      bestCount = count;
-    }
-  }
-  return best;
+function tileKey(p: Point) {
+  return `${Math.floor(p.x / TILE_W)},${Math.floor(p.y / TILE_H)}`;
 }
 
-function stepBack(prev: Point[][], start: Point, steps: number) {
-  let cur = start;
-  for (let i = 0; i < steps; i += 1) cur = prev[cur.y][cur.x];
-  return cur;
+function tileEntry(next: Point[][], cols: number, rows: number): Point {
+  let cur = { x: 0, y: 0 };
+  for (let i = 0; i < cols * rows; i += 1) {
+    const nxt = next[cur.y][cur.x];
+    if (tileKey(cur) !== tileKey(nxt)) return nxt;
+    cur = nxt;
+  }
+  return { x: 0, y: 0 };
 }
 
 export function createGame(cols: number, rows = cols): GameState {
   const cycleNext = generateCycleNext(cols, rows);
   const prev = cyclePrev(cycleNext, cols, rows);
   const foods = spawnFoods([], [], cols, rows);
-  const focus = densestFood(foods);
-  const head = focus
-    ? stepBack(prev, focus, 3)
-    : {
-        x: Math.floor(Math.random() * cols),
-        y: Math.floor(Math.random() * rows),
-      };
+  const head = tileEntry(cycleNext, cols, rows);
   const neck = prev[head.y][head.x];
   const tail = prev[neck.y][neck.x];
   const snake: Point[] = [head, neck, tail];

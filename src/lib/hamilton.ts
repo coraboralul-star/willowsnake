@@ -290,52 +290,291 @@ function coil(w: number, h: number): Point[] | null {
   );
 }
 
-function tileCoils(w: number, h: number, tw: number, th: number): Point[] | null {
-  if (tw < 2 || th < 2 || w % tw !== 0 || h % th !== 0) return null;
-  const rows: Point[][] = [];
-  for (let y = 0; y < h; y += th) {
-    const row: Point[][] = [];
-    for (let x = 0; x < w; x += tw) {
-      const piece = Math.random() < 0.5 ? coil(tw, th) : reverseOrder(coil(tw, th) ?? []);
-      if (!piece || piece.length !== tw * th) return null;
-      row.push(offset(piece, x, y));
+function hamPath(w: number, h: number, start: Point, end: Point): Point[] | null {
+  const need = w * h;
+  const used = Array.from({ length: h }, () => Array(w).fill(false));
+  const path: Point[] = [];
+
+  function walk(cur: Point): boolean {
+    path.push(cur);
+    used[cur.y][cur.x] = true;
+    if (path.length === need) return eq(cur, end);
+    if (eq(cur, end)) {
+      used[cur.y][cur.x] = false;
+      path.pop();
+      return false;
     }
-    const joined = joinPath(row, w, h);
-    if (!joined) return null;
-    rows.push(joined);
+    const opts = [
+      { x: cur.x + 1, y: cur.y },
+      { x: cur.x - 1, y: cur.y },
+      { x: cur.x, y: cur.y + 1 },
+      { x: cur.x, y: cur.y - 1 },
+    ].filter((p) => p.x >= 0 && p.y >= 0 && p.x < w && p.y < h && !used[p.y][p.x]);
+    opts.sort((a, b) => {
+      const da = Math.abs(a.x - end.x) + Math.abs(a.y - end.y);
+      const db = Math.abs(b.x - end.x) + Math.abs(b.y - end.y);
+      return da - db;
+    });
+    for (const next of opts) {
+      if (walk(next)) return true;
+    }
+    used[cur.y][cur.x] = false;
+    path.pop();
+    return false;
   }
-  return joinPath(rows, w, h);
+
+  return walk(start) ? path.map((p) => ({ ...p })) : null;
 }
 
-function dress(order: Point[], w: number, h: number) {
-  let next = Math.random() < 0.5 ? reverseOrder(order) : order;
-  const flipX = Math.random() < 0.5;
-  const flipY = Math.random() < 0.5;
-  return next.map((p) => ({
-    x: flipX ? w - 1 - p.x : p.x,
-    y: flipY ? h - 1 - p.y : p.y,
-  }));
+function colZigzag(tw: number, th: number): Point[] {
+  const pts: Point[] = [];
+  for (let x = 0; x < tw; x += 1) {
+    if (x % 2 === 0) {
+      for (let y = 0; y < th; y += 1) pts.push({ x, y });
+    } else {
+      for (let y = th - 1; y >= 0; y -= 1) pts.push({ x, y });
+    }
+  }
+  return pts;
 }
 
-function buildTight(w: number, h: number): Point[] | null {
-  const tiles: [number, number][] = [
-    [4, 4],
-    [4, 6],
-    [6, 4],
-  ];
-  for (const [tw, th] of tiles.sort(() => Math.random() - 0.5)) {
-    const order = tileCoils(w, h, tw, th);
-    if (order && isBoardCycle(order, w, h)) return order;
+function rowZigzag(tw: number, th: number): Point[] {
+  const pts: Point[] = [];
+  for (let y = 0; y < th; y += 1) {
+    if (y % 2 === 0) {
+      for (let x = 0; x < tw; x += 1) pts.push({ x, y });
+    } else {
+      for (let x = tw - 1; x >= 0; x -= 1) pts.push({ x, y });
+    }
   }
-  return tileCoils(w, h, 4, 4) ?? tileCoils(w, h, 4, 6);
+  return pts;
+}
+
+function inwardSpiral(tw: number, th: number): Point[] {
+  const pts: Point[] = [];
+  let x0 = 0;
+  let y0 = 0;
+  let x1 = tw - 1;
+  let y1 = th - 1;
+  while (x0 <= x1 && y0 <= y1) {
+    for (let x = x0; x <= x1; x += 1) pts.push({ x, y: y0 });
+    for (let y = y0 + 1; y <= y1; y += 1) pts.push({ x: x1, y });
+    if (y0 < y1) {
+      for (let x = x1 - 1; x >= x0; x -= 1) pts.push({ x, y: y1 });
+    }
+    if (x0 < x1) {
+      for (let y = y1 - 1; y > y0; y -= 1) pts.push({ x: x0, y });
+    }
+    x0 += 1;
+    y0 += 1;
+    x1 -= 1;
+    y1 -= 1;
+  }
+  return pts;
+}
+
+function tileFills(tw: number, th: number): Point[][] {
+  const bases = [inwardSpiral(tw, th), colZigzag(tw, th), rowZigzag(tw, th)];
+  const out: Point[][] = [];
+  const seen = new Set<string>();
+
+  function add(order: Point[]) {
+    if (order.length !== tw * th) return;
+    const key = order.map((p) => `${p.x},${p.y}`).join(">");
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(order);
+  }
+
+  for (const base of bases) {
+    const flips = [
+      base,
+      base.map((p) => ({ x: tw - 1 - p.x, y: p.y })),
+      base.map((p) => ({ x: p.x, y: th - 1 - p.y })),
+      base.map((p) => ({ x: tw - 1 - p.x, y: th - 1 - p.y })),
+    ];
+    for (const flipped of flips) {
+      add(flipped);
+      add(reverseOrder(flipped));
+      if (tw === th) {
+        const rot = flipped.map((p) => ({ x: tw - 1 - p.y, y: p.x }));
+        add(rot);
+        add(reverseOrder(rot));
+      }
+    }
+  }
+  return out;
+}
+
+function gridHamCycle(nx: number, ny: number): Point[] | null {
+  if (nx < 2 || ny < 2) return null;
+  if (ny % 2 === 0) return cycleEvenHeight(nx, ny);
+  if (nx % 2 === 0) {
+    return cycleEvenHeight(ny, nx).map((p) => ({ x: p.y, y: p.x }));
+  }
+  return null;
+}
+
+function cycleEvenHeight(nx: number, ny: number): Point[] {
+  const pts: Point[] = [];
+  for (let y = 0; y < ny; y += 1) pts.push({ x: 0, y });
+  for (let y = ny - 1; y >= 0; y -= 1) {
+    if ((ny - 1 - y) % 2 === 0) {
+      for (let x = 1; x < nx; x += 1) pts.push({ x, y });
+    } else {
+      for (let x = nx - 1; x >= 1; x -= 1) pts.push({ x, y });
+    }
+  }
+  return pts;
+}
+
+function inBox(p: Point, box: { ox: number; oy: number }, tw: number, th: number) {
+  return p.x >= box.ox && p.y >= box.oy && p.x < box.ox + tw && p.y < box.oy + th;
+}
+
+function neighborInBox(p: Point, box: { ox: number; oy: number }, tw: number, th: number) {
+  return (
+    [
+      { x: p.x + 1, y: p.y },
+      { x: p.x - 1, y: p.y },
+      { x: p.x, y: p.y + 1 },
+      { x: p.x, y: p.y - 1 },
+    ].find((q) => inBox(q, box, tw, th)) ?? null
+  );
+}
+
+function sharedEdge(
+  box: { ox: number; oy: number },
+  other: { ox: number; oy: number },
+  tw: number,
+  th: number,
+) {
+  const cells: Point[] = [];
+  for (let y = 0; y < th; y += 1) {
+    for (let x = 0; x < tw; x += 1) {
+      const p = { x: box.ox + x, y: box.oy + y };
+      if (neighborInBox(p, other, tw, th)) cells.push(p);
+    }
+  }
+  return cells;
+}
+
+function tiledSpiral(w: number, h: number, tw: number, th: number): Point[] | null {
+  if (w % tw !== 0 || h % th !== 0) return null;
+  const tiles = gridHamCycle(w / tw, h / th);
+  if (!tiles || tiles.length !== (w / tw) * (h / th)) return null;
+  const boxes = tiles.map((t) => ({ ox: t.x * tw, oy: t.y * th }));
+  const n = boxes.length;
+  const fills = tileFills(tw, th);
+  const starts = sharedEdge(boxes[0], boxes[n - 1], tw, th);
+  const attempts = starts.length ? starts : [{ x: boxes[0].ox, y: boxes[0].oy }];
+
+  for (const start0 of attempts) {
+    const stitched = stitchTiles(boxes, fills, start0, tw, th, w, h);
+    if (stitched) return stitched;
+  }
+  return null;
+}
+
+function stitchTiles(
+  boxes: { ox: number; oy: number }[],
+  fills: Point[][],
+  start0: Point,
+  tw: number,
+  th: number,
+  w: number,
+  h: number,
+): Point[] | null {
+  const n = boxes.length;
+  const out: Point[] = [];
+  let start = start0;
+
+  for (let i = 0; i < n; i += 1) {
+    const box = boxes[i];
+    const nxt = boxes[(i + 1) % n];
+    const localStart = { x: start.x - box.ox, y: start.y - box.oy };
+    const piece = pickFill(fills, localStart, box, nxt, tw, th, i === n - 1 ? start0 : null);
+    if (!piece) return null;
+    out.push(...piece);
+    if (i < n - 1) {
+      const end = piece[piece.length - 1];
+      const step = neighborInBox(end, nxt, tw, th);
+      if (!step) return null;
+      start = step;
+    }
+  }
+
+  return isBoardCycle(out, w, h) ? out : null;
+}
+
+function fillScore(order: Point[]) {
+  const { turns, maxRun } = cycleStats(order);
+  return turns * 10 - maxRun * maxRun;
+}
+
+function pickFill(
+  fills: Point[][],
+  localStart: Point,
+  box: { ox: number; oy: number },
+  nxt: { ox: number; oy: number },
+  tw: number,
+  th: number,
+  closeTo: Point | null,
+): Point[] | null {
+  let best: Point[] | null = null;
+  let bestScore = -Infinity;
+  for (const fill of fills) {
+    if (!eq(fill[0], localStart)) continue;
+    const end = offset([fill[fill.length - 1]], box.ox, box.oy)[0];
+    const ok = closeTo ? manhattan(end, closeTo) === 1 : Boolean(neighborInBox(end, nxt, tw, th));
+    if (!ok) continue;
+    const score = fillScore(fill) + (fills.indexOf(fill) < 8 ? 4 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = offset(fill, box.ox, box.oy);
+    }
+  }
+  if (best) return best;
+
+  const exits = sharedEdge(box, nxt, tw, th);
+  for (const end of exits) {
+    if (eq(end, { x: box.ox + localStart.x, y: box.oy + localStart.y }) && tw * th > 1) {
+      continue;
+    }
+    if (closeTo && manhattan(end, closeTo) !== 1) continue;
+    if (!closeTo && !neighborInBox(end, nxt, tw, th)) continue;
+    const path = hamPath(tw, th, localStart, { x: end.x - box.ox, y: end.y - box.oy });
+    if (path) return offset(path, box.ox, box.oy);
+  }
+  return null;
+}
+
+let lastCycleKind = "none";
+
+export function cycleKind() {
+  return lastCycleKind;
 }
 
 export function generateCycleNext(w: number, h = w): Point[][] {
-  let order = buildTight(w, h);
-  if (!order || !isBoardCycle(order, w, h)) order = tileCoils(w, h, 4, 4);
-  if (order && isBoardCycle(order, w, h)) order = dress(order, w, h);
-  if (!order || !isBoardCycle(order, w, h)) order = coil(w, h);
-  if (!order || !isBoardCycle(order, w, h)) order = serpentine(w, h);
+  lastCycleKind = "none";
+  let order = tiledSpiral(w, h, 4, 4);
+  if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x4";
+  if (!order || !isBoardCycle(order, w, h)) {
+    order = tiledSpiral(w, h, 4, 6);
+    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x6";
+  }
+  if (!order || !isBoardCycle(order, w, h)) {
+    order = tiledSpiral(w, h, 8, 8);
+    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-8x8";
+  }
+  if (!order || !isBoardCycle(order, w, h)) {
+    order = coil(w, h);
+    if (order && isBoardCycle(order, w, h)) lastCycleKind = "coil";
+  }
+  if (!order || !isBoardCycle(order, w, h)) {
+    order = serpentine(w, h);
+    lastCycleKind = "serpentine";
+  }
 
   const next = Array.from({ length: h }, () => Array<Point>(w));
   for (let i = 0; i < order.length; i += 1) {
