@@ -130,8 +130,12 @@ export function useSnakeGame(
       retryRef.current = null;
     }
     applyComboToggle();
-    liveRef.current = startRun(createGame(cols, rows), performance.now());
-    if (isAutoplay()) autoplayOnNewRun(liveRef.current.tickMs);
+    let game = createGame(cols, rows);
+    if (isAutoplay()) {
+      autoplayOnNewRun(game.tickMs);
+      game = applyAutoplayDir(game, pickAutoplayDir(game));
+    }
+    liveRef.current = startRun(game, performance.now());
     keysRef.current?.reset();
     beginRun();
     publish();

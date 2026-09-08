@@ -10,6 +10,8 @@ import {
 
 let autoplayOn = false;
 let huntAt: Point | null = null;
+let huntIdle = 0;
+let huntDist = Infinity;
 
 export function isAutoplay() {
   return autoplayOn;
@@ -21,6 +23,8 @@ export function enableAutoplay() {
 
 export function autoplayOnNewRun(_tickMs = 104) {
   huntAt = null;
+  huntIdle = 0;
+  huntDist = Infinity;
 }
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
@@ -187,39 +191,43 @@ function canFillPocket(
   return { apples: apples.length, size: flood.cells.length, seen: flood.seen };
 }
 
-function densestApple(state: GameState, from: Point) {
+function crowding(state: GameState, food: Point) {
+  return state.snake.filter((part) => manhattan(part, food) <= 3).length;
+}
+
+function nearestOpenApple(state: GameState, from: Point, skip: Point | null = null) {
   if (state.foods.length === 0) return null;
-  let best = state.foods[0];
-  let bestCount = -1;
-  let bestDist = Infinity;
+  let best: Point | null = null;
+  let bestScore = Infinity;
   for (const food of state.foods) {
-    const count = state.foods.filter((other) => manhattan(food, other) <= 4).length;
-    const dist = manhattan(from, food);
-    if (count > bestCount || (count === bestCount && dist < bestDist)) {
+    if (skip && food.x === skip.x && food.y === skip.y) continue;
+    const score = manhattan(from, food) * 4 + crowding(state, food) * 3;
+    if (score < bestScore) {
       best = food;
-      bestCount = count;
-      bestDist = dist;
+      bestScore = score;
     }
   }
-  return best;
+  return best ?? (skip ? state.foods.find((food) => food.x !== skip.x || food.y !== skip.y) ?? skip : null);
 }
 
 function resolveHunt(state: GameState, from: Point) {
-  if (state.foods.length === 0) {
+  const fresh = nearestOpenApple(state, from);
+  if (!fresh) {
     huntAt = null;
+    huntIdle = 0;
+    huntDist = Infinity;
     return null;
   }
   if (huntAt && state.foods.some((food) => food.x === huntAt!.x && food.y === huntAt!.y)) {
-    return huntAt;
+    const keep = manhattan(from, huntAt);
+    const alt = manhattan(from, fresh);
+    if (keep <= alt + 2 && crowding(state, huntAt) <= crowding(state, fresh) + 1) {
+      return huntAt;
+    }
   }
-  const near = huntAt
-    ? state.foods.find((food) => manhattan(food, huntAt!) <= 1)
-    : null;
-  if (near) {
-    huntAt = near;
-    return huntAt;
-  }
-  huntAt = densestApple(state, from);
+  huntAt = fresh;
+  huntIdle = 0;
+  huntDist = manhattan(from, huntAt);
   return huntAt;
 }
 
@@ -243,6 +251,33 @@ function wouldBoxApple(
   return false;
 }
 
+const TURN_LEFT: Record<Direction, Direction> = {
+  up: "left",
+  left: "down",
+  down: "right",
+  right: "up",
+};
+
+function cellAt(from: Point, dir: Direction) {
+  return { x: from.x + DELTA[dir].x, y: from.y + DELTA[dir].y };
+}
+
+function alongSelf(from: Point, dir: Direction, blocked: Set<string>) {
+  const sideA = cellAt(from, TURN_LEFT[dir]);
+  const sideB = cellAt(from, TURN_LEFT[TURN_LEFT[TURN_LEFT[dir]]]);
+  return blocked.has(keyOf(sideA)) || blocked.has(keyOf(sideB));
+}
+
+function minAppleDist(state: GameState, p: Point) {
+  if (state.foods.length === 0) return Infinity;
+  let best = Infinity;
+  for (const food of state.foods) {
+    const d = manhattan(p, food);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 function huntDir(
   state: GameState,
   from: Point,
@@ -253,18 +288,31 @@ function huntDir(
 ): Direction | null {
   const noGo = OPPOSITE[state.direction];
   const here = manhattan(from, goal);
+  const hereAny = minAppleDist(state, from);
   const preferH = Math.abs(goal.x - from.x) >= Math.abs(goal.y - from.y);
   const closer: { dir: Direction; man: number }[] = [];
+  const safe: { dir: Direction; man: number; any: number }[] = [];
   for (const dir of DIRS) {
     if (dir === noGo) continue;
-    const cell = { x: from.x + DELTA[dir].x, y: from.y + DELTA[dir].y };
+    const cell = cellAt(from, dir);
     if (!isClear(state, cell, blocked) || !hamOk(dir, cell)) continue;
     const man = manhattan(cell, goal);
+    const any = minAppleDist(state, cell);
+    safe.push({ dir, man, any });
     if (man < here) closer.push({ dir, man });
+  }
+  const breakout = safe
+    .filter((opt) => !alongSelf(from, opt.dir, blocked) && opt.any < hereAny)
+    .sort((a, b) => a.any - b.any || a.man - b.man);
+  if (breakout.length > 0 && (closer.length === 0 || closer.every((opt) => alongSelf(from, opt.dir, blocked)))) {
+    return breakout[0].dir;
   }
   if (closer.length === 0) return null;
   const horiz = (dir: Direction) => dir === "left" || dir === "right";
   closer.sort((a, b) => {
+    const pinA = alongSelf(from, a.dir, blocked) ? 1 : 0;
+    const pinB = alongSelf(from, b.dir, blocked) ? 1 : 0;
+    if (pinA !== pinB) return pinA - pinB;
     if (a.man !== b.man) return a.man - b.man;
     if (horiz(a.dir) !== horiz(b.dir)) {
       if (preferH) return horiz(a.dir) ? -1 : 1;
@@ -361,8 +409,25 @@ export function pickAutoplayDir(state: GameState): Direction {
   }
   if (eat) return eat;
 
-  const hunt = fill < EARLY_FILL ? resolveHunt(state, head) : null;
-  if (fill >= EARLY_FILL) huntAt = null;
+  let hunt = fill < EARLY_FILL ? resolveHunt(state, head) : null;
+  if (fill >= EARLY_FILL) {
+    huntAt = null;
+    huntIdle = 0;
+    huntDist = Infinity;
+  } else if (hunt) {
+    const d = manhattan(head, hunt);
+    if (d >= huntDist) huntIdle += 1;
+    else huntIdle = 0;
+    huntDist = d;
+    if (huntIdle >= 6) {
+      const skip = hunt;
+      huntAt = null;
+      huntIdle = 0;
+      huntDist = Infinity;
+      hunt = nearestOpenApple(state, head, skip);
+      huntAt = hunt;
+    }
+  }
 
   type PocketMove = { dir: Direction; apples: number; size: number; food: boolean; seen: Set<string> };
   let pocket: PocketMove | null = null;
@@ -393,14 +458,30 @@ export function pickAutoplayDir(state: GameState): Direction {
   }
 
   if (hunt) {
-    const seek = huntDir(state, head, hunt, blocked, cycleDir, hamOk) ?? astarDir(state, head, hunt, blocked, hamOk);
+    const seek =
+      huntDir(state, head, hunt, blocked, cycleDir, hamOk) ??
+      astarDir(state, head, hunt, blocked, hamOk);
     if (seek) return seek;
-    const other = state.foods.find((food) => food.x !== hunt.x || food.y !== hunt.y);
-    if (other) {
+    const other = nearestOpenApple(state, head, hunt);
+    if (other && (other.x !== hunt.x || other.y !== hunt.y)) {
       huntAt = other;
-      const retry = huntDir(state, head, other, blocked, cycleDir, hamOk) ?? astarDir(state, head, other, blocked, hamOk);
+      const retry =
+        huntDir(state, head, other, blocked, cycleDir, hamOk) ??
+        astarDir(state, head, other, blocked, hamOk);
       if (retry) return retry;
     }
+    let bestDir: Direction | null = null;
+    let bestAny = minAppleDist(state, head);
+    for (const dir of DIRS) {
+      const cell = cellAt(head, dir);
+      if (!hamOk(dir, cell)) continue;
+      const any = minAppleDist(state, cell);
+      if (any < bestAny) {
+        bestAny = any;
+        bestDir = dir;
+      }
+    }
+    if (bestDir) return bestDir;
   }
 
   const cycleCell = { x: head.x + DELTA[cycleDir].x, y: head.y + DELTA[cycleDir].y };
