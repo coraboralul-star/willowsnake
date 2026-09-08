@@ -1,4 +1,4 @@
-import { cycleIndex, cyclePrev, generateCycleNext } from "@/lib/hamilton";
+import { cycleIndex, generateCycleNext } from "@/lib/hamilton";
 
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
@@ -68,22 +68,12 @@ export const NITRO_TICK = 50;
 export const SLOW_TICK = 140;
 export const HIJACK_MS = 14400;
 export const RANDOM_FOOD_AT = 220;
-const FOOD_AHEAD_MIN = CELLS_PER_SEC;
-const FOOD_AHEAD_MAX = CELLS_PER_SEC * 4;
-const FOOD_AHEAD_GAP = 10;
 
 export function foodTarget(cols: number, rows: number, snakeLen = 0) {
   const room = Math.max(0, cols * rows - snakeLen);
   if (room === 0) return 0;
   const want = snakeLen >= RANDOM_FOOD_AT ? 2 : Math.random() < 0.4 ? 1 : 2;
   return Math.min(want, room);
-}
-
-function dirOf(from: Point, to: Point): Direction {
-  if (to.x === from.x + 1) return "right";
-  if (to.x === from.x - 1) return "left";
-  if (to.y === from.y + 1) return "down";
-  return "up";
 }
 
 function foodKey(p: Point) {
@@ -108,13 +98,13 @@ function wouldBunch(foods: Point[], cell: Point) {
 
 export function createGame(cols: number, rows = cols): GameState {
   const cycleNext = generateCycleNext(cols, rows);
-  const prev = cyclePrev(cycleNext, cols, rows);
-  const idx = cycleIndex(cycleNext, cols, rows);
-  const head = { x: 0, y: 0 };
-  const neck = prev[head.y][head.x];
-  const tail = prev[neck.y][neck.x];
-  const snake: Point[] = [head, neck, tail];
-  const direction = dirOf(head, cycleNext[head.y][head.x]);
+  const y = Math.floor(rows / 2);
+  const snake: Point[] = [
+    { x: 3, y },
+    { x: 2, y },
+    { x: 1, y },
+  ];
+  const direction: Direction = "right";
 
   return {
     cols,
@@ -124,9 +114,9 @@ export function createGame(cols: number, rows = cols): GameState {
     prevSnake: snake.map((p) => ({ ...p })),
     direction,
     queued: [],
-    foods: spawnFoods(snake, [], cols, rows, { cycleIndex: idx, head }),
+    foods: spawnFoods(snake, [], cols, rows),
     cycleNext,
-    cycleIndex: idx,
+    cycleIndex: cycleIndex(cycleNext, cols, rows),
     score: 0,
     status: "idle",
     tickStartedAt: 0,
@@ -204,7 +194,6 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
         state.foods.filter((food) => food.x !== nextHead.x || food.y !== nextHead.y),
         state.cols,
         state.rows,
-        { cycleIndex: state.cycleIndex, head: snake[0] },
       )
     : state.foods;
 
@@ -253,23 +242,17 @@ export function spinePath(prev: Point[], curr: Point[], t: number): Point[] {
 
 type CycleHint = { cycleIndex: number[][]; head: Point };
 
-function invertCycle(cycleIndex: number[][], cols: number, rows: number): Point[] {
-  const at: Point[] = new Array(cols * rows);
-  for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      at[cycleIndex[y][x]] = { x, y };
-    }
+function manhattan(a: Point, b: Point) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function clearance(snake: Point[], cell: Point) {
+  let best = Infinity;
+  for (const part of snake) {
+    const d = manhattan(part, cell);
+    if (d < best) best = d;
   }
-  return at;
-}
-
-function cycleAhead(index: number[][], head: Point, cell: Point, n: number) {
-  return (index[cell.y][cell.x] - index[head.y][head.x] + n) % n;
-}
-
-function cycleGap(a: number, b: number, n: number) {
-  const d = Math.abs(a - b) % n;
-  return Math.min(d, n - d);
+  return best;
 }
 
 function pickEmpty(foods: Food[], cols: number, rows: number, taken: Set<string>): Point | null {
@@ -288,46 +271,36 @@ function pickEmpty(foods: Food[], cols: number, rows: number, taken: Set<string>
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function pickAlongCycle(
+function pickInOpen(
   snake: Point[],
   foods: Food[],
   cols: number,
   rows: number,
   taken: Set<string>,
-  along: CycleHint,
 ): Point | null {
-  const n = cols * rows;
-  const { cycleIndex, head } = along;
-  const headI = cycleIndex[head.y]?.[head.x];
-  if (headI == null || headI < 0) return pickEmpty(foods, cols, rows, taken);
-
-  const at = invertCycle(cycleIndex, cols, rows);
-  const existing = foods.map((food) => cycleAhead(cycleIndex, head, food, n));
-  const freeAhead = Math.max(1, n - snake.length - 1);
-
-  const collect = (minD: number, maxD: number) => {
-    const pool: Point[] = [];
-    for (let d = minD; d <= maxD; d += 1) {
-      const cell = at[(headI + d) % n];
-      if (!cell || taken.has(foodKey(cell))) continue;
+  const head = snake[0];
+  const tight: Point[] = [];
+  const loose: Point[] = [];
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      if (taken.has(`${x},${y}`)) continue;
+      const cell = { x, y };
       if (wouldBunch(foods, cell)) continue;
-      if (existing.some((ed) => cycleGap(ed, d, n) < FOOD_AHEAD_GAP)) continue;
-      pool.push(cell);
+      const man = manhattan(head, cell);
+      const clear = clearance(snake, cell);
+      if (man >= 8 && man <= 20 && clear >= 2) tight.push(cell);
+      else if (man >= 4 && clear >= 1) loose.push(cell);
     }
-    return pool;
-  };
-
-  const windows: [number, number][] = [
-    [FOOD_AHEAD_MIN, FOOD_AHEAD_MAX],
-    [FOOD_AHEAD_MIN, Math.min(80, freeAhead)],
-    [8, freeAhead],
-  ];
-  for (const [minD, maxD] of windows) {
-    if (maxD < minD) continue;
-    const pool = collect(minD, maxD);
-    if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
   }
-  return pickEmpty(foods, cols, rows, taken);
+  const rank = (pool: Point[]) => {
+    const scored = pool
+      .map((cell) => ({ cell, clear: clearance(snake, cell), man: manhattan(head, cell) }))
+      .sort((a, b) => b.clear - a.clear || b.man - a.man);
+    const top = scored.slice(0, Math.max(3, Math.ceil(scored.length * 0.35)));
+    if (top.length === 0) return null;
+    return top[Math.floor(Math.random() * top.length)].cell;
+  };
+  return rank(tight) ?? rank(loose) ?? pickEmpty(foods, cols, rows, taken);
 }
 
 export function spawnFoods(
@@ -335,16 +308,16 @@ export function spawnFoods(
   foods: Food[],
   cols: number,
   rows: number,
-  along?: CycleHint,
+  _along?: CycleHint,
 ): Food[] {
   const target = Math.min(foodTarget(cols, rows, snake.length), cols * rows - snake.length);
   const taken = new Set([...snake, ...foods].map(foodKey));
   const result: Food[] = foods.map((food) => ({ ...food }));
-  const guided = Boolean(along) && snake.length < RANDOM_FOOD_AT;
+  const inOpen = snake.length < RANDOM_FOOD_AT;
 
   while (result.length < target) {
-    const pick = guided && along
-      ? pickAlongCycle(snake, result, cols, rows, taken, along)
+    const pick = inOpen
+      ? pickInOpen(snake, result, cols, rows, taken)
       : pickEmpty(result, cols, rows, taken);
     if (!pick) break;
     result.push({ ...pick, kind: "apple" });
