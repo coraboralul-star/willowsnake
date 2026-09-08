@@ -222,70 +222,6 @@ function pathSafe(state: GameState, path: Point[]) {
   return true;
 }
 
-function walkAxis(blocked: Set<string>, from: Point, to: Point, horizFirst: boolean): Point[] | null {
-  const path: Point[] = [];
-  let x = from.x;
-  let y = from.y;
-  const stepX = () => {
-    const dx = Math.sign(to.x - x);
-    while (x !== to.x) {
-      x += dx;
-      const p = { x, y };
-      if (blocked.has(keyOf(p))) return false;
-      path.push(p);
-    }
-    return true;
-  };
-  const stepY = () => {
-    const dy = Math.sign(to.y - y);
-    while (y !== to.y) {
-      y += dy;
-      const p = { x, y };
-      if (blocked.has(keyOf(p))) return false;
-      path.push(p);
-    }
-    return true;
-  };
-  if (horizFirst) {
-    if (!stepX() || !stepY()) return null;
-  } else if (!stepY() || !stepX()) {
-    return null;
-  }
-  return path;
-}
-
-function cheapPath(state: GameState, goal: Point, noGo: Direction | null): Point[] | null {
-  const head = state.snake[0];
-  if (eq(head, goal)) return [];
-  const blocked = simBlocked(toSim(state), state.pendingGrow > 0);
-  if (!inBounds(state, goal) || blocked.has(keyOf(goal))) return null;
-
-  const options: Point[][] = [];
-  for (const horizFirst of [true, false]) {
-    const path = walkAxis(blocked, head, goal, horizFirst);
-    if (!path || path.length === 0) continue;
-    const dir = dirBetween(head, path[0]);
-    if (!dir || dir === noGo) continue;
-    options.push(path);
-  }
-  if (options.length === 0) return null;
-
-  const keys = snakeSet(state);
-  const hugs = (cell: Point) => {
-    let n = 0;
-    for (const dir of DIRS) {
-      if (keys.has(keyOf(cellAt(cell, dir)))) n += 1;
-    }
-    return n;
-  };
-  options.sort((a, b) => {
-    const voidA = a.reduce((n, cell) => n + (hugs(cell) === 0 ? 1 : 0), 0);
-    const voidB = b.reduce((n, cell) => n + (hugs(cell) === 0 ? 1 : 0), 0);
-    return voidA - voidB || a.length - b.length;
-  });
-  return options[0];
-}
-
 function firstSafeDir(state: GameState, path: Point[] | null): Direction | null {
   if (!path || path.length === 0) return null;
   if (!pathSafe(state, path)) return null;
@@ -303,11 +239,9 @@ function huntDir(state: GameState): Direction | null {
   const sim0 = toSim(state);
 
   for (const apple of apples) {
-    const sweep = firstSafeDir(state, cheapPath(state, apple, noGo));
-    if (sweep) return sweep;
     const path = pathTo(sim0, apple, noGo);
-    const short = firstSafeDir(state, path);
-    if (short) return short;
+    const dir = firstSafeDir(state, path);
+    if (dir) return dir;
   }
   return null;
 }
@@ -316,82 +250,92 @@ function snakeSet(state: GameState) {
   return new Set(state.snake.map(keyOf));
 }
 
-function openCount(state: GameState, cell: Point) {
-  const blocked = snakeSet(state);
+function coverCount(state: GameState, keys: Set<string>, cell: Point) {
   let n = 0;
   for (const dir of DIRS) {
     const p = cellAt(cell, dir);
-    if (inBounds(state, p) && !blocked.has(keyOf(p))) n += 1;
+    if (!inBounds(state, p) || keys.has(keyOf(p))) n += 1;
   }
   return n;
 }
 
-function bodyHugs(state: GameState, cell: Point) {
-  const keys = snakeSet(state);
+function emptySpan(
+  state: GameState,
+  keys: Set<string>,
+  cell: Point,
+  horizontal: boolean,
+) {
+  let lo = horizontal ? cell.x : cell.y;
+  let hi = lo;
+  const max = horizontal ? state.cols - 1 : state.rows - 1;
+  const emptyAt = (v: number) => {
+    const p = horizontal ? { x: v, y: cell.y } : { x: cell.x, y: v };
+    return inBounds(state, p) && !keys.has(keyOf(p));
+  };
+  const blockedByBody = (v: number) => {
+    if (v < 0 || v > max) return false;
+    const p = horizontal ? { x: v, y: cell.y } : { x: cell.x, y: v };
+    return keys.has(keyOf(p));
+  };
+  while (lo > 0 && emptyAt(lo - 1)) lo -= 1;
+  while (hi < max && emptyAt(hi + 1)) hi += 1;
+  const bodyEnds = (blockedByBody(lo - 1) ? 1 : 0) + (blockedByBody(hi + 1) ? 1 : 0);
+  return { lo, hi, len: hi - lo + 1, bodyEnds };
+}
+
+function spanIsHole(
+  h: { len: number; bodyEnds: number },
+  v: { len: number; bodyEnds: number },
+) {
+  const short = h.len <= v.len ? h : v;
+  const long = h.len <= v.len ? v : h;
+  if (short.len > 8 || long.len > 12) return false;
+  return short.bodyEnds === 2;
+}
+
+function isTightCell(state: GameState, keys: Set<string>, cell: Point) {
+  if (!inBounds(state, cell) || keys.has(keyOf(cell))) return false;
+  return spanIsHole(emptySpan(state, keys, cell, true), emptySpan(state, keys, cell, false));
+}
+
+function tightFlood(state: GameState, keys: Set<string>, start: Point) {
+  if (!isTightCell(state, keys, start)) return 0;
+  const seen = new Set<string>([keyOf(start)]);
+  const q: Point[] = [start];
+  for (let i = 0; i < q.length; i += 1) {
+    for (const dir of DIRS) {
+      const n = cellAt(q[i], dir);
+      const id = keyOf(n);
+      if (seen.has(id) || !isTightCell(state, keys, n)) continue;
+      seen.add(id);
+      q.push(n);
+    }
+  }
+  return seen.size;
+}
+
+function extraHugs(state: GameState, keys: Set<string>) {
+  const head = state.snake[0];
+  const neck = state.snake[1];
   let n = 0;
   for (const dir of DIRS) {
-    if (keys.has(keyOf(cellAt(cell, dir)))) n += 1;
+    const p = cellAt(head, dir);
+    if (!keys.has(keyOf(p))) continue;
+    if (neck && eq(p, neck)) continue;
+    n += 1;
   }
   return n;
 }
 
-function reachableEmpty(state: GameState): Point[] {
-  const sim = toSim(state);
-  const blocked = simBlocked(sim, sim.pendingGrow > 0);
-  const area = floodFrom(sim, state.snake[0], blocked);
-  const out: Point[] = [];
-  for (const id of area) {
-    const [x, y] = id.split(",").map(Number);
-    out.push({ x, y });
+function holeNearby(state: GameState, keys: Set<string>) {
+  const head = state.snake[0];
+  const h = emptySpan(state, keys, head, true);
+  const v = emptySpan(state, keys, head, false);
+  if (spanIsHole(h, v)) return true;
+  for (const dir of DIRS) {
+    if (tightFlood(state, keys, cellAt(head, dir)) > 0) return true;
   }
-  return out;
-}
-
-function dirToGoal(state: GameState, goal: Point): Direction | null {
-  const noGo = OPPOSITE[state.direction];
-  const path = pathTo(toSim(state), goal, noGo);
-  if (!path || path.length === 0) return null;
-  if (!pathSafe(state, path)) return null;
-  const dir = dirBetween(state.snake[0], path[0]);
-  if (!dir || dir === noGo || wouldDie(state, dir)) return null;
-  return dir;
-}
-
-function pocketBox(cells: Point[]) {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const cell of cells) {
-    if (cell.x < minX) minX = cell.x;
-    if (cell.y < minY) minY = cell.y;
-    if (cell.x > maxX) maxX = cell.x;
-    if (cell.y > maxY) maxY = cell.y;
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-function isCrust(state: GameState, cell: Point) {
-  return bodyHugs(state, cell) >= 1 || openCount(state, cell) <= 2;
-}
-
-function chooseHorizontal(state: GameState, box: { minX: number; minY: number; maxX: number; maxY: number }) {
-  const w = box.maxX - box.minX + 1;
-  const h = box.maxY - box.minY + 1;
-  if (h >= w + 2) return false;
-  if (w >= h + 2) return true;
-  const phase = Math.floor(state.snake.length / 18) % 2;
-  const facingH = state.direction === "left" || state.direction === "right";
-  return phase === 0 ? facingH : !facingH;
-}
-
-function sweepPrimary(
-  horizontal: boolean,
-  cell: Point,
-  box: { minX: number; minY: number; maxX: number; maxY: number },
-): Direction {
-  if (horizontal) return ((cell.y - box.minY) & 1) === 0 ? "right" : "left";
-  return ((cell.x - box.minX) & 1) === 0 ? "down" : "up";
+  return false;
 }
 
 function tryStep(state: GameState, dir: Direction) {
@@ -399,59 +343,56 @@ function tryStep(state: GameState, dir: Direction) {
   return Boolean(stepSim(toSim(state), cellAt(state.snake[0], dir)));
 }
 
-function nearestCrust(state: GameState, pocket: Point[]) {
+function gapFillDir(state: GameState): Direction | null {
   const head = state.snake[0];
-  let best: Point | null = null;
-  let bestD = Infinity;
-  for (const cell of pocket) {
-    if (!isCrust(state, cell)) continue;
-    const d = manhattan(head, cell);
-    if (d < bestD || (d === bestD && bodyHugs(state, cell) > (best ? bodyHugs(state, best) : -1))) {
-      bestD = d;
-      best = cell;
+  const keys = snakeSet(state);
+  const neck = state.snake[1];
+  const hRun = emptySpan(state, keys, head, true);
+  const vRun = emptySpan(state, keys, head, false);
+  const shortH = hRun.len < vRun.len || (hRun.len === vRun.len && hRun.bodyEnds >= vRun.bodyEnds);
+  const short = shortH ? hRun : vRun;
+  const inHole =
+    spanIsHole(hRun, vRun) || extraHugs(state, keys) >= 1;
+
+  let best: { dir: Direction; score: number } | null = null;
+  for (const dir of DIRS) {
+    if (!tryStep(state, dir)) continue;
+    const cell = cellAt(head, dir);
+    const h = emptySpan(state, keys, cell, true);
+    const v = emptySpan(state, keys, cell, false);
+    const span = h.len <= v.len ? h : v;
+    const covers = coverCount(state, keys, cell);
+    const hole = tightFlood(state, keys, cell);
+    const uTurn = Boolean(neck && manhattan(cell, neck) === 1 && dir !== state.direction);
+    let along = 0;
+    let fold = 0;
+    if (inHole) {
+      if (shortH) {
+        if (dir === "right" && head.x < hRun.hi) along = 1;
+        if (dir === "left" && head.x > hRun.lo) along = 1;
+        if ((head.x === hRun.lo || head.x === hRun.hi) && (dir === "up" || dir === "down")) fold = 1;
+      } else {
+        if (dir === "down" && head.y < vRun.hi) along = 1;
+        if (dir === "up" && head.y > vRun.lo) along = 1;
+        if ((head.y === vRun.lo || head.y === vRun.hi) && (dir === "left" || dir === "right")) fold = 1;
+      }
     }
+    const roomStraight = dir === state.direction && hole === 0 && span.len >= 8;
+    const longCorridor =
+      dir === state.direction && span.len <= 2 && Math.max(h.len, v.len) >= 10;
+    const score =
+      (hole > 0 ? 90 - hole : 0) +
+      (8 - Math.min(span.len, 8)) * 10 +
+      span.bodyEnds * 16 +
+      covers * 12 +
+      (uTurn ? 22 : 0) +
+      along * 24 +
+      fold * 36 -
+      (roomStraight ? 70 : 0) -
+      (longCorridor ? 80 : 0);
+    if (!best || score > best.score) best = { dir, score };
   }
-  return best ?? pocket[0] ?? null;
-}
-
-function pocketSweepDir(state: GameState): Direction | null {
-  const head = state.snake[0];
-  const pocket = reachableEmpty(state);
-  if (pocket.length === 0) return null;
-  const pocketSet = new Set(pocket.map(keyOf));
-  const box = pocketBox(pocket);
-  const horizontal = chooseHorizontal(state, box);
-  const primary = sweepPrimary(horizontal, head, box);
-  const folds: Direction[] = horizontal ? ["down", "up"] : ["right", "left"];
-
-  const packed = isCrust(state, head);
-  if (packed) {
-    const viable: { dir: Direction; cell: Point }[] = [];
-    for (const dir of DIRS) {
-      const cell = cellAt(head, dir);
-      if (!pocketSet.has(keyOf(cell))) continue;
-      if (!tryStep(state, dir)) continue;
-      viable.push({ dir, cell });
-    }
-    const crustMoves = viable.filter((item) => isCrust(state, item.cell));
-    const pool = crustMoves.length > 0 ? crustMoves : viable;
-    let best: { dir: Direction; score: number } | null = null;
-    for (const item of pool) {
-      const hugs = bodyHugs(state, item.cell);
-      const straight = item.dir === state.direction ? 1 : 0;
-      const prim = item.dir === primary ? 1 : 0;
-      const fold = folds.includes(item.dir) ? 1 : 0;
-      const score = hugs * 8 + straight * 14 + prim * 12 + fold * 6;
-      if (!best || score > best.score) best = { dir: item.dir, score };
-    }
-    if (best) return best.dir;
-  }
-
-  const goal = nearestCrust(state, pocket);
-  if (!goal) return null;
-  const sweep = firstSafeDir(state, cheapPath(state, goal, OPPOSITE[state.direction]));
-  if (sweep) return sweep;
-  return dirToGoal(state, goal);
+  return best?.dir ?? null;
 }
 
 function tailOutDir(state: GameState): Direction | null {
@@ -493,11 +434,17 @@ export function pickAutoplayDir(state: GameState): Direction {
     if (stepSim(toSim(state), cell)) return dir;
   }
 
+  const keys = snakeSet(state);
+  if (holeNearby(state, keys)) {
+    const holeFill = gapFillDir(state);
+    if (holeFill) return holeFill;
+  }
+
   const hunt = huntDir(state);
   if (hunt) return hunt;
 
-  const sweep = pocketSweepDir(state);
-  if (sweep) return sweep;
+  const fill = gapFillDir(state);
+  if (fill) return fill;
 
   const out = tailOutDir(state);
   if (out) return out;
