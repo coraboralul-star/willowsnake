@@ -10,6 +10,7 @@ import {
 } from "@/lib/engine";
 
 let autoplayOn = false;
+let recentHeads: string[] = [];
 
 export function isAutoplay() {
   return autoplayOn;
@@ -19,7 +20,9 @@ export function enableAutoplay() {
   autoplayOn = true;
 }
 
-export function autoplayOnNewRun(_tickMs = BASE_TICK) {}
+export function autoplayOnNewRun(_tickMs = BASE_TICK) {
+  recentHeads = [];
+}
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
 const LEFT: Record<Direction, Direction> = {
@@ -287,10 +290,9 @@ function spanIsHole(
   h: { len: number; bodyEnds: number },
   v: { len: number; bodyEnds: number },
 ) {
-  const short = h.len <= v.len ? h : v;
-  const long = h.len <= v.len ? v : h;
-  if (short.len > 8 || long.len > 12) return false;
-  return short.bodyEnds === 2;
+  if (h.bodyEnds === 2 && h.len <= 8) return true;
+  if (v.bodyEnds === 2 && v.len >= 3 && v.len <= 12) return true;
+  return false;
 }
 
 function isTightCell(state: GameState, keys: Set<string>, cell: Point) {
@@ -327,6 +329,39 @@ function extraHugs(state: GameState, keys: Set<string>) {
   return n;
 }
 
+function noteHead(state: GameState) {
+  recentHeads.push(keyOf(state.snake[0]));
+  if (recentHeads.length > 40) recentHeads.shift();
+}
+
+function looping() {
+  if (recentHeads.length < 16) return false;
+  const slice = recentHeads.slice(-20);
+  const unique = new Set(slice);
+  if (slice.length >= 16 && unique.size <= 8) return true;
+  const cur = recentHeads[recentHeads.length - 1];
+  return slice.slice(0, -1).filter((k) => k === cur).length >= 2;
+}
+
+function recentlyAt(cell: Point, within = 12) {
+  const id = keyOf(cell);
+  return recentHeads.slice(-within).includes(id);
+}
+
+function currentRun(state: GameState) {
+  const d = state.direction;
+  let n = 1;
+  for (let i = 0; i < state.snake.length - 1; i += 1) {
+    if (dirBetween(state.snake[i + 1], state.snake[i]) !== d) break;
+    n += 1;
+  }
+  return n;
+}
+
+function isHoriz(dir: Direction) {
+  return dir === "left" || dir === "right";
+}
+
 function holeNearby(state: GameState, keys: Set<string>) {
   const head = state.snake[0];
   const h = emptySpan(state, keys, head, true);
@@ -346,13 +381,12 @@ function tryStep(state: GameState, dir: Direction) {
 function gapFillDir(state: GameState): Direction | null {
   const head = state.snake[0];
   const keys = snakeSet(state);
-  const neck = state.snake[1];
   const hRun = emptySpan(state, keys, head, true);
   const vRun = emptySpan(state, keys, head, false);
-  const shortH = hRun.len < vRun.len || (hRun.len === vRun.len && hRun.bodyEnds >= vRun.bodyEnds);
-  const short = shortH ? hRun : vRun;
-  const inHole =
-    spanIsHole(hRun, vRun) || extraHugs(state, keys) >= 1;
+  const tallCorridor = hRun.len <= 2 && vRun.len >= 3;
+  const useH = !tallCorridor;
+  const inHole = spanIsHole(hRun, vRun) || extraHugs(state, keys) >= 1;
+  const run = currentRun(state);
 
   let best: { dir: Direction; score: number } | null = null;
   for (const dir of DIRS) {
@@ -360,36 +394,43 @@ function gapFillDir(state: GameState): Direction | null {
     const cell = cellAt(head, dir);
     const h = emptySpan(state, keys, cell, true);
     const v = emptySpan(state, keys, cell, false);
-    const span = h.len <= v.len ? h : v;
     const covers = coverCount(state, keys, cell);
     const hole = tightFlood(state, keys, cell);
-    const uTurn = Boolean(neck && manhattan(cell, neck) === 1 && dir !== state.direction);
+    const horizMove = isHoriz(dir);
     let along = 0;
     let fold = 0;
-    if (inHole) {
-      if (shortH) {
-        if (dir === "right" && head.x < hRun.hi) along = 1;
-        if (dir === "left" && head.x > hRun.lo) along = 1;
-        if ((head.x === hRun.lo || head.x === hRun.hi) && (dir === "up" || dir === "down")) fold = 1;
-      } else {
-        if (dir === "down" && head.y < vRun.hi) along = 1;
-        if (dir === "up" && head.y > vRun.lo) along = 1;
-        if ((head.y === vRun.lo || head.y === vRun.hi) && (dir === "left" || dir === "right")) fold = 1;
-      }
+    if (inHole && useH) {
+      if (dir === "right" && head.x < hRun.hi) along = 1;
+      if (dir === "left" && head.x > hRun.lo) along = 1;
+      if ((head.x === hRun.lo || head.x === hRun.hi) && (dir === "up" || dir === "down")) fold = 1;
+    } else if (inHole && !useH) {
+      if (dir === "down" && head.y < vRun.hi) along = 1;
+      if (dir === "up" && head.y > vRun.lo) along = 1;
+      if ((head.y === vRun.lo || head.y === vRun.hi) && isHoriz(dir)) fold = 1;
     }
-    const roomStraight = dir === state.direction && hole === 0 && span.len >= 8;
-    const longCorridor =
-      dir === state.direction && span.len <= 2 && Math.max(h.len, v.len) >= 10;
+
+    const shortVert =
+      !horizMove &&
+      ((dir === state.direction && run < 3 && vRun.len < 3) ||
+        (dir !== state.direction && isHoriz(state.direction) && fold === 0 && v.len < 3));
+    const roomStraight = dir === state.direction && hole === 0 && (horizMove ? h.len : v.len) >= 8;
+    const longCorridor = dir === state.direction && h.len <= 2 && v.len >= 10 && !horizMove;
+    const revisit = recentlyAt(cell, 10) ? 1 : 0;
+    const rowTight = horizMove ? (6 - Math.min(h.len, 6)) * 8 : 0;
+    const colOk = !horizMove && v.len >= 3 ? 12 : 0;
     const score =
-      (hole > 0 ? 90 - hole : 0) +
-      (8 - Math.min(span.len, 8)) * 10 +
-      span.bodyEnds * 16 +
-      covers * 12 +
-      (uTurn ? 22 : 0) +
-      along * 24 +
-      fold * 36 -
+      (hole > 0 ? 70 - hole : 0) +
+      rowTight +
+      colOk +
+      (horizMove ? 18 : 0) +
+      h.bodyEnds * (horizMove ? 14 : 4) +
+      covers * 10 +
+      along * 28 +
+      fold * 40 -
+      (shortVert ? 55 : 0) -
       (roomStraight ? 70 : 0) -
-      (longCorridor ? 80 : 0);
+      (longCorridor ? 80 : 0) -
+      revisit * 90;
     if (!best || score > best.score) best = { dir, score };
   }
   return best?.dir ?? null;
@@ -426,6 +467,7 @@ function cycleFallback(state: GameState): Direction | null {
 
 export function pickAutoplayDir(state: GameState): Direction {
   const facing = state.queued.at(-1) ?? state.direction;
+  noteHead(state);
 
   for (const dir of DIRS) {
     if (dir === OPPOSITE[state.direction]) continue;
@@ -435,7 +477,7 @@ export function pickAutoplayDir(state: GameState): Direction {
   }
 
   const keys = snakeSet(state);
-  if (holeNearby(state, keys)) {
+  if (holeNearby(state, keys) && !looping()) {
     const holeFill = gapFillDir(state);
     if (holeFill) return holeFill;
   }
@@ -443,7 +485,7 @@ export function pickAutoplayDir(state: GameState): Direction {
   const hunt = huntDir(state);
   if (hunt) return hunt;
 
-  const fill = gapFillDir(state);
+  const fill = looping() ? null : gapFillDir(state);
   if (fill) return fill;
 
   const out = tailOutDir(state);
