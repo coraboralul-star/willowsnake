@@ -684,21 +684,138 @@ function snailShell(w: number, h: number): Point[] | null {
   return merged && isBoardCycle(merged, w, h) ? merged : null;
 }
 
-function twinSpiral(w: number, h: number): Point[] | null {
-  if (w < 12 || w % 2 !== 0 || h % 2 !== 0) return null;
-  const leftW = Math.floor(w / 2);
-  const rightW = w - leftW;
-  if (leftW < 6 || rightW < 6) return null;
-  const leftRaw = coil(leftW, h);
-  const rightRaw = coil(rightW, h);
-  if (!leftRaw || !rightRaw) return null;
-  const left = addTeeth(leftRaw, leftW, h, 10);
-  const right = addTeeth(rightRaw, rightW, h, 10);
+function mergeEither(a: Point[], b: Point[], w: number, h: number): Point[] | null {
   return (
-    joinPath([left, offset(right, leftW, 0)], w, h) ??
-    joinPath([left, offset(reverseOrder(right), leftW, 0)], w, h) ??
-    joinPath([reverseOrder(left), offset(right, leftW, 0)], w, h)
+    mergeCycles(a, b, w, h) ??
+    mergeCycles(b, a, w, h) ??
+    mergeCycles(a, reverseOrder(b), w, h) ??
+    mergeCycles(reverseOrder(b), a, w, h) ??
+    mergeCycles(reverseOrder(a), b, w, h) ??
+    mergeCycles(b, reverseOrder(a), w, h)
   );
+}
+
+function joinVariants(parts: Point[][], w: number, h: number): Point[] | null {
+  if (parts.length === 0) return null;
+  let accs: Point[][] = [parts[0], reverseOrder(parts[0])];
+  for (let i = 1; i < parts.length; i += 1) {
+    const part = parts[i];
+    const next: Point[][] = [];
+    const seen = new Set<string>();
+    for (const acc of accs) {
+      for (const piece of [part, reverseOrder(part)]) {
+        const merged = mergeEither(acc, piece, w, h);
+        if (!merged) continue;
+        const key = `${merged[0].x},${merged[0].y}:${merged.length}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        next.push(merged);
+      }
+    }
+    if (next.length === 0) return null;
+    accs = next.slice(0, 6);
+  }
+  const need = parts.reduce((sum, p) => sum + p.length, 0);
+  return accs.find((p) => isSimpleCycle(p) && p.length === need) ?? null;
+}
+
+function rectCycle(rw: number, rh: number, ox = 0, oy = 0): Point[] | null {
+  const raw = coil(rw, rh);
+  if (!raw) return null;
+  return offset(raw, ox, oy);
+}
+
+function twinMid(w: number, h: number): Point[] | null {
+  if (w < 16 || w % 2 !== 0 || h % 2 !== 0) return null;
+  const midW = 4;
+  const wing = (w - midW) / 2;
+  if (wing < 6 || wing % 2 !== 0) return null;
+  const left = rectCycle(wing, h, 0, 0);
+  const mid = rectCycle(midW, h, wing, 0);
+  const right = rectCycle(wing, h, wing + midW, 0);
+  if (!left || !mid || !right) return null;
+  const joined = joinVariants([left, mid, right], w, h);
+  return joined && isBoardCycle(joined, w, h) ? joined : null;
+}
+
+function twinSpiral(w: number, h: number): Point[] | null {
+  return twinMid(w, h);
+}
+
+function twinHorizontal(w: number, h: number): Point[] | null {
+  if (h < 16 || w % 2 !== 0 || h % 2 !== 0) return null;
+  const midH = 4;
+  const wing = (h - midH) / 2;
+  if (wing < 6 || wing % 2 !== 0) return null;
+  const top = rectCycle(w, wing, 0, 0);
+  const mid = rectCycle(w, midH, 0, wing);
+  const bot = rectCycle(w, wing, 0, wing + midH);
+  if (!top || !mid || !bot) return null;
+  const joined = joinVariants([top, mid, bot], w, h);
+  return joined && isBoardCycle(joined, w, h) ? joined : null;
+}
+
+function quadSpiral(w: number, h: number): Point[] | null {
+  if (w < 16 || h < 16 || w % 2 !== 0 || h % 2 !== 0) return null;
+  const midW = 4;
+  const midH = 4;
+  const wingX = (w - midW) / 2;
+  const wingY = (h - midH) / 2;
+  if (wingX < 6 || wingY < 6 || wingX % 2 !== 0 || wingY % 2 !== 0) return null;
+  const tl = rectCycle(wingX, wingY, 0, 0);
+  const tm = rectCycle(midW, wingY, wingX, 0);
+  const tr = rectCycle(wingX, wingY, wingX + midW, 0);
+  const ml = rectCycle(wingX, midH, 0, wingY);
+  const mc = rectCycle(midW, midH, wingX, wingY);
+  const mr = rectCycle(wingX, midH, wingX + midW, wingY);
+  const bl = rectCycle(wingX, wingY, 0, wingY + midH);
+  const bm = rectCycle(midW, wingY, wingX, wingY + midH);
+  const br = rectCycle(wingX, wingY, wingX + midW, wingY + midH);
+  if (!tl || !tm || !tr || !ml || !mc || !mr || !bl || !bm || !br) return null;
+  const top = joinVariants([tl, tm, tr], w, h);
+  const mid = joinVariants([ml, mc, mr], w, h);
+  const bot = joinVariants([bl, bm, br], w, h);
+  if (!top || !mid || !bot) return null;
+  const joined = joinVariants([top, mid, bot], w, h);
+  return joined && isBoardCycle(joined, w, h) ? joined : null;
+}
+
+function rowWaves(
+  rw: number,
+  rh: number,
+  ox: number,
+  oy: number,
+  boardW: number,
+  boardH: number,
+  band = 4,
+): Point[] | null {
+  if (rh % band !== 0 || band < 2) return null;
+  const parts: Point[][] = [];
+  for (let y = 0; y < rh; y += band) {
+    const piece = rectCycle(rw, band, ox, oy + y);
+    if (!piece) return null;
+    parts.push(piece);
+  }
+  return joinVariants(parts, boardW, boardH);
+}
+
+function halfSplit(w: number, h: number): Point[] | null {
+  if (w < 12 || w % 2 !== 0 || h % 4 !== 0) return null;
+  const leftW = w / 2;
+  const left = rectCycle(leftW, h, 0, 0);
+  const waves = rowWaves(w - leftW, h, leftW, 0, w, h, 4);
+  if (!left || !waves) return null;
+  const joined = joinVariants([left, waves], w, h);
+  return joined && isBoardCycle(joined, w, h) ? joined : null;
+}
+
+function basementSnail(w: number, h: number, gap: number): Point[] | null {
+  if (gap < 2 || h - gap < 8 || h % 2 !== 0 || gap % 2 !== 0) return null;
+  const top = coil(w, h - gap);
+  const bot = coil(w, gap);
+  if (!top || !bot) return null;
+  const merged = mergeEither(top, offset(bot, 0, h - gap), w, h);
+  return merged && isBoardCycle(merged, w, h) ? merged : null;
 }
 
 function startTopLeft(order: Point[]): Point[] {
@@ -723,9 +840,14 @@ export function cycleKind() {
 export function generateCycleNext(w: number, h = w): Point[][] {
   lastCycleKind = "none";
   const builders: [string, () => Point[] | null][] = [
-    ["snail", () => snailShell(w, h)],
-    ["snail", () => snailShell(w, h)],
-    ["twin", () => twinSpiral(w, h)],
+    ["twin-mid", () => twinMid(w, h)],
+    ["twin-mid", () => twinMid(w, h)],
+    ["quad", () => quadSpiral(w, h)],
+    ["snail-4", () => basementSnail(w, h, 4)],
+    ["snail-6", () => basementSnail(w, h, 6)],
+    ["twin-h", () => twinHorizontal(w, h)],
+    ["half-wave", () => halfSplit(w, h)],
+    ["waves", () => rowWaves(w, h, 0, 0, w, h, 4)],
     ["coil-core", () => coilWithZipperCore(w, h)],
   ];
   const start = Math.floor(Math.random() * builders.length);
