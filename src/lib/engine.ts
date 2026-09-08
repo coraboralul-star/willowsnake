@@ -66,9 +66,16 @@ export const MIN_TICK = 55;
 export const NITRO_TICK = 55;
 export const SLOW_TICK = 180;
 export const HIJACK_MS = 14400;
+export const RANDOM_FOOD_AT = 220;
+const FOOD_AHEAD_MIN = 12;
+const FOOD_AHEAD_MAX = 38;
+const FOOD_AHEAD_GAP = 8;
 
-export function foodTarget(cols: number, rows: number) {
-  return 9 + (cols - 12) + Math.floor((rows - cols) / 2);
+export function foodTarget(cols: number, rows: number, snakeLen = 0) {
+  const room = Math.max(0, cols * rows - snakeLen);
+  if (room === 0) return 0;
+  const want = snakeLen >= RANDOM_FOOD_AT ? 2 : Math.random() < 0.4 ? 1 : 2;
+  return Math.min(want, room);
 }
 
 function dirOf(from: Point, to: Point): Direction {
@@ -101,14 +108,12 @@ function wouldBunch(foods: Point[], cell: Point) {
 export function createGame(cols: number, rows = cols): GameState {
   const cycleNext = generateCycleNext(cols, rows);
   const prev = cyclePrev(cycleNext, cols, rows);
-  const foods = spawnFoods([], [], cols, rows);
+  const idx = cycleIndex(cycleNext, cols, rows);
   const head = { x: 0, y: 0 };
   const neck = prev[head.y][head.x];
   const tail = prev[neck.y][neck.x];
   const snake: Point[] = [head, neck, tail];
   const direction = dirOf(head, cycleNext[head.y][head.x]);
-  const taken = new Set(snake.map(foodKey));
-  const kept = foods.filter((food) => !taken.has(foodKey(food)));
 
   return {
     cols,
@@ -118,9 +123,9 @@ export function createGame(cols: number, rows = cols): GameState {
     prevSnake: snake.map((p) => ({ ...p })),
     direction,
     queued: [],
-    foods: spawnFoods(snake, kept, cols, rows),
+    foods: spawnFoods(snake, [], cols, rows, { cycleIndex: idx, head }),
     cycleNext,
-    cycleIndex: cycleIndex(cycleNext, cols, rows),
+    cycleIndex: idx,
     score: 0,
     status: "idle",
     tickStartedAt: 0,
@@ -198,6 +203,7 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
         state.foods.filter((food) => food.x !== nextHead.x || food.y !== nextHead.y),
         state.cols,
         state.rows,
+        { cycleIndex: state.cycleIndex, head: snake[0] },
       )
     : state.foods;
 
@@ -244,25 +250,102 @@ export function spinePath(prev: Point[], curr: Point[], t: number): Point[] {
   return ribbonPath(prev, curr, t);
 }
 
-export function spawnFoods(snake: Point[], foods: Food[], cols: number, rows: number): Food[] {
-  const target = Math.min(foodTarget(cols, rows), cols * rows - snake.length);
+type CycleHint = { cycleIndex: number[][]; head: Point };
+
+function invertCycle(cycleIndex: number[][], cols: number, rows: number): Point[] {
+  const at: Point[] = new Array(cols * rows);
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      at[cycleIndex[y][x]] = { x, y };
+    }
+  }
+  return at;
+}
+
+function cycleAhead(index: number[][], head: Point, cell: Point, n: number) {
+  return (index[cell.y][cell.x] - index[head.y][head.x] + n) % n;
+}
+
+function cycleGap(a: number, b: number, n: number) {
+  const d = Math.abs(a - b) % n;
+  return Math.min(d, n - d);
+}
+
+function pickEmpty(foods: Food[], cols: number, rows: number, taken: Set<string>): Point | null {
+  const spaced: Point[] = [];
+  const any: Point[] = [];
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      if (taken.has(`${x},${y}`)) continue;
+      const cell = { x, y };
+      any.push(cell);
+      if (!wouldBunch(foods, cell)) spaced.push(cell);
+    }
+  }
+  const pool = spaced.length > 0 ? spaced : any;
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function pickAlongCycle(
+  snake: Point[],
+  foods: Food[],
+  cols: number,
+  rows: number,
+  taken: Set<string>,
+  along: CycleHint,
+): Point | null {
+  const n = cols * rows;
+  const { cycleIndex, head } = along;
+  const headI = cycleIndex[head.y]?.[head.x];
+  if (headI == null || headI < 0) return pickEmpty(foods, cols, rows, taken);
+
+  const at = invertCycle(cycleIndex, cols, rows);
+  const existing = foods.map((food) => cycleAhead(cycleIndex, head, food, n));
+  const freeAhead = Math.max(1, n - snake.length - 1);
+
+  const collect = (minD: number, maxD: number) => {
+    const pool: Point[] = [];
+    for (let d = minD; d <= maxD; d += 1) {
+      const cell = at[(headI + d) % n];
+      if (!cell || taken.has(foodKey(cell))) continue;
+      if (wouldBunch(foods, cell)) continue;
+      if (existing.some((ed) => cycleGap(ed, d, n) < FOOD_AHEAD_GAP)) continue;
+      pool.push(cell);
+    }
+    return pool;
+  };
+
+  const windows: [number, number][] = [
+    [FOOD_AHEAD_MIN, FOOD_AHEAD_MAX],
+    [FOOD_AHEAD_MIN, Math.min(80, freeAhead)],
+    [8, freeAhead],
+  ];
+  for (const [minD, maxD] of windows) {
+    if (maxD < minD) continue;
+    const pool = collect(minD, maxD);
+    if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
+  }
+  return pickEmpty(foods, cols, rows, taken);
+}
+
+export function spawnFoods(
+  snake: Point[],
+  foods: Food[],
+  cols: number,
+  rows: number,
+  along?: CycleHint,
+): Food[] {
+  const target = Math.min(foodTarget(cols, rows, snake.length), cols * rows - snake.length);
   const taken = new Set([...snake, ...foods].map(foodKey));
   const result: Food[] = foods.map((food) => ({ ...food }));
+  const guided = Boolean(along) && snake.length < RANDOM_FOOD_AT;
 
   while (result.length < target) {
-    const spaced: Point[] = [];
-    const any: Point[] = [];
-    for (let y = 0; y < rows; y += 1) {
-      for (let x = 0; x < cols; x += 1) {
-        if (taken.has(`${x},${y}`)) continue;
-        const cell = { x, y };
-        any.push(cell);
-        if (!wouldBunch(result, cell)) spaced.push(cell);
-      }
-    }
-    const pool = spaced.length > 0 ? spaced : any;
-    if (pool.length === 0) break;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const pick = guided && along
+      ? pickAlongCycle(snake, result, cols, rows, taken, along)
+      : pickEmpty(result, cols, rows, taken);
+    if (!pick) break;
     result.push({ ...pick, kind: "apple" });
     taken.add(foodKey(pick));
   }

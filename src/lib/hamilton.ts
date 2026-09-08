@@ -373,8 +373,112 @@ function inwardSpiral(tw: number, th: number): Point[] {
   return pts;
 }
 
-function tileFills(tw: number, th: number): Point[][] {
-  const bases = [inwardSpiral(tw, th), colZigzag(tw, th), rowZigzag(tw, th)];
+function pathStats(order: Point[]) {
+  let turns = 0;
+  let maxRun = 1;
+  let run = 1;
+  for (let i = 1; i < order.length - 1; i += 1) {
+    const a = order[i - 1];
+    const b = order[i];
+    const c = order[i + 1];
+    const dx1 = b.x - a.x;
+    const dy1 = b.y - a.y;
+    const dx2 = c.x - b.x;
+    const dy2 = c.y - b.y;
+    if (dx1 === dx2 && dy1 === dy2) {
+      run += 1;
+      if (run > maxRun) maxRun = run;
+    } else {
+      turns += 1;
+      run = 1;
+    }
+  }
+  return { turns, maxRun };
+}
+
+function allHamPaths(tw: number, th: number): Point[][] {
+  const need = tw * th;
+  const out: Point[][] = [];
+  const used = Array.from({ length: th }, () => Array<boolean>(tw).fill(false));
+  const path: Point[] = [];
+  const dirs: Point[] = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+  ];
+  function dfs() {
+    if (path.length === need) {
+      out.push(path.map((p) => ({ x: p.x, y: p.y })));
+      return;
+    }
+    const last = path[path.length - 1];
+    for (const d of dirs) {
+      const x = last.x + d.x;
+      const y = last.y + d.y;
+      if (x < 0 || y < 0 || x >= tw || y >= th || used[y][x]) continue;
+      used[y][x] = true;
+      path.push({ x, y });
+      dfs();
+      path.pop();
+      used[y][x] = false;
+    }
+  }
+  for (let y = 0; y < th; y += 1) {
+    for (let x = 0; x < tw; x += 1) {
+      used[y][x] = true;
+      path.push({ x, y });
+      dfs();
+      path.pop();
+      used[y][x] = false;
+    }
+  }
+  return out;
+}
+
+const stairFillCache = new Map<string, Point[][]>();
+
+function stairFills(tw: number, th: number): Point[][] {
+  const key = `${tw}x${th}`;
+  const cached = stairFillCache.get(key);
+  if (cached) return cached;
+  const best = new Map<string, { path: Point[]; turns: number; maxRun: number }>();
+  for (const path of allHamPaths(tw, th)) {
+    const { turns, maxRun } = pathStats(path);
+    if (maxRun > 2) continue;
+    const start = path[0];
+    const end = path[path.length - 1];
+    const k = `${start.x},${start.y}->${end.x},${end.y}`;
+    const prev = best.get(k);
+    if (!prev || maxRun < prev.maxRun || (maxRun === prev.maxRun && turns > prev.turns)) {
+      best.set(k, { path, turns, maxRun });
+    }
+  }
+  const fills = [...best.values()].map((v) => v.path);
+  stairFillCache.set(key, fills);
+  return fills;
+}
+
+function crenel(tw: number, th: number, phase = 0): Point[] {
+  const pts: Point[] = [];
+  if (tw === 2) {
+    for (let y = 0; y < th; y += 1) {
+      if ((y + phase) % 2 === 0) pts.push({ x: 0, y }, { x: 1, y });
+      else pts.push({ x: 1, y }, { x: 0, y });
+    }
+    return pts;
+  }
+  if (th === 2) {
+    for (let x = 0; x < tw; x += 1) {
+      if ((x + phase) % 2 === 0) pts.push({ x, y: 0 }, { x, y: 1 });
+      else pts.push({ x, y: 1 }, { x, y: 0 });
+    }
+    return pts;
+  }
+  return rowZigzag(tw, th);
+}
+
+function fillsFromBases(tw: number, th: number, bases: Point[][]): Point[][] {
   const out: Point[][] = [];
   const seen = new Set<string>();
 
@@ -404,6 +508,20 @@ function tileFills(tw: number, th: number): Point[][] {
     }
   }
   return out;
+}
+
+function crenelFills(tw: number, th: number): Point[][] {
+  return fillsFromBases(tw, th, [crenel(tw, th, 0), crenel(tw, th, 1)]);
+}
+
+function tileFills(tw: number, th: number): Point[][] {
+  return fillsFromBases(tw, th, [
+    crenel(tw, th, 0),
+    crenel(tw, th, 1),
+    inwardSpiral(tw, th),
+    colZigzag(tw, th),
+    rowZigzag(tw, th),
+  ]);
 }
 
 function gridHamCycle(nx: number, ny: number): Point[] | null {
@@ -485,18 +603,26 @@ function sharedEdge(
   return cells;
 }
 
-function tiledSpiral(w: number, h: number, tw: number, th: number): Point[] | null {
+function tiledSpiral(
+  w: number,
+  h: number,
+  tw: number,
+  th: number,
+  fillsOverride?: Point[][],
+  allowHamPath = true,
+): Point[] | null {
   if (w % tw !== 0 || h % th !== 0) return null;
   const tiles = gridHamCycle(w / tw, h / th);
   if (!tiles || tiles.length !== (w / tw) * (h / th)) return null;
   const boxes = tiles.map((t) => ({ ox: t.x * tw, oy: t.y * th }));
   const n = boxes.length;
-  const fills = tw === 2 && th === 2 ? squareFills() : tileFills(tw, th);
+  const fills =
+    fillsOverride ?? (tw === 2 && th === 2 ? squareFills() : tileFills(tw, th));
   const starts = sharedEdge(boxes[0], boxes[n - 1], tw, th);
   const attempts = starts.length ? starts : [{ x: boxes[0].ox, y: boxes[0].oy }];
 
   for (const start0 of attempts) {
-    const stitched = stitchTiles(boxes, fills, start0, tw, th, w, h);
+    const stitched = stitchTiles(boxes, fills, start0, tw, th, w, h, allowHamPath);
     if (stitched) return stitched;
   }
   return null;
@@ -510,32 +636,40 @@ function stitchTiles(
   th: number,
   w: number,
   h: number,
+  allowHamPath = true,
 ): Point[] | null {
   const n = boxes.length;
   const out: Point[] = [];
   let start = start0;
+  let inbound: Point | null = null;
 
   for (let i = 0; i < n; i += 1) {
     const box = boxes[i];
     const nxt = boxes[(i + 1) % n];
     const localStart = { x: start.x - box.ox, y: start.y - box.oy };
-    const piece = pickFill(fills, localStart, box, nxt, tw, th, i === n - 1 ? start0 : null);
+    const piece = pickFill(
+      fills,
+      localStart,
+      box,
+      nxt,
+      tw,
+      th,
+      i === n - 1 ? start0 : null,
+      allowHamPath,
+      inbound,
+    );
     if (!piece) return null;
     out.push(...piece);
     if (i < n - 1) {
       const end = piece[piece.length - 1];
       const step = neighborInBox(end, nxt, tw, th);
       if (!step) return null;
+      inbound = { x: step.x - end.x, y: step.y - end.y };
       start = step;
     }
   }
 
   return isBoardCycle(out, w, h) ? out : null;
-}
-
-function fillScore(order: Point[]) {
-  const { turns, maxRun } = cycleStats(order);
-  return turns * 10 - maxRun * maxRun;
 }
 
 function pickFill(
@@ -546,21 +680,40 @@ function pickFill(
   tw: number,
   th: number,
   closeTo: Point | null,
+  allowHamPath = true,
+  inbound: Point | null = null,
 ): Point[] | null {
   let best: Point[] | null = null;
   let bestScore = -Infinity;
   for (const fill of fills) {
     if (!eq(fill[0], localStart)) continue;
-    const end = offset([fill[fill.length - 1]], box.ox, box.oy)[0];
+    const world = offset(fill, box.ox, box.oy);
+    const end = world[world.length - 1];
     const ok = closeTo ? manhattan(end, closeTo) === 1 : Boolean(neighborInBox(end, nxt, tw, th));
     if (!ok) continue;
-    const score = fillScore(fill) + (fills.indexOf(fill) < 8 ? 4 : 0);
+    const { maxRun, turns } = pathStats(fill);
+    let score = turns * 10 - maxRun * maxRun + (maxRun <= 1 ? 80 : maxRun <= 2 ? 20 : 0);
+    if (inbound && fill.length > 1) {
+      const first = { x: fill[1].x - fill[0].x, y: fill[1].y - fill[0].y };
+      if (first.x === inbound.x && first.y === inbound.y) score -= 140;
+    }
+    if (fill.length > 1) {
+      const last = fill[fill.length - 1];
+      const prev = fill[fill.length - 2];
+      const lastDir = { x: last.x - prev.x, y: last.y - prev.y };
+      const exit = closeTo ?? neighborInBox(end, nxt, tw, th);
+      if (exit) {
+        const exitDir = { x: exit.x - end.x, y: exit.y - end.y };
+        if (exitDir.x === lastDir.x && exitDir.y === lastDir.y) score -= 140;
+      }
+    }
     if (score > bestScore) {
       bestScore = score;
-      best = offset(fill, box.ox, box.oy);
+      best = world;
     }
   }
   if (best) return best;
+  if (!allowHamPath) return null;
 
   const exits = sharedEdge(box, nxt, tw, th);
   for (const end of exits) {
@@ -809,6 +962,22 @@ function halfSplit(w: number, h: number): Point[] | null {
   return joined && isBoardCycle(joined, w, h) ? joined : null;
 }
 
+function stepsVertical(w: number, h: number): Point[] | null {
+  return (
+    tiledSpiral(w, h, 2, 4, stairFills(2, 4), false) ??
+    tiledSpiral(w, h, 2, 4, crenelFills(2, 4), false) ??
+    tiledSpiral(w, h, 2, 4)
+  );
+}
+
+function stepsHorizontal(w: number, h: number): Point[] | null {
+  return (
+    tiledSpiral(w, h, 4, 2, stairFills(4, 2), false) ??
+    tiledSpiral(w, h, 4, 2, crenelFills(4, 2), false) ??
+    tiledSpiral(w, h, 4, 2)
+  );
+}
+
 function basementSnail(w: number, h: number, gap: number): Point[] | null {
   if (gap < 2 || h - gap < 8 || h % 2 !== 0 || gap % 2 !== 0) return null;
   const top = coil(w, h - gap);
@@ -840,6 +1009,12 @@ export function cycleKind() {
 export function generateCycleNext(w: number, h = w): Point[][] {
   lastCycleKind = "none";
   const builders: [string, () => Point[] | null][] = [
+    ["steps", () => stepsVertical(w, h)],
+    ["steps", () => stepsVertical(w, h)],
+    ["steps", () => stepsVertical(w, h)],
+    ["steps-h", () => stepsHorizontal(w, h)],
+    ["steps-h", () => stepsHorizontal(w, h)],
+    ["steps-h", () => stepsHorizontal(w, h)],
     ["twin-mid", () => twinMid(w, h)],
     ["twin-mid", () => twinMid(w, h)],
     ["quad", () => quadSpiral(w, h)],
