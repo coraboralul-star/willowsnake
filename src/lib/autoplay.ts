@@ -9,9 +9,9 @@ import {
   type Point,
 } from "@/lib/engine";
 
-// Hunt if the whole route still leaves a path to the tail.
-// Otherwise pack into the open room, but only with moves that stay safe.
-// The tail is a safety check, never a destination.
+// Livecade-style: ride the inner face of the body and pack into one room.
+// Fruit is a short safe cut after a stroke, not a board-wide hunt.
+// Tail is only a safety check, never a destination.
 
 let autoplayOn = false;
 
@@ -71,6 +71,10 @@ function inBounds(sim: GSnake, p: Point) {
 
 function headOf(sim: GSnake) {
   return sim.snake[0];
+}
+
+function neckOf(sim: GSnake) {
+  return sim.snake[1];
 }
 
 function tailOf(sim: GSnake) {
@@ -221,28 +225,29 @@ function bodyTouches(sim: GSnake, p: Point, skip?: Point) {
   return n;
 }
 
-function floodSize(sim: GSnake, start: Point, limit = 120) {
+function onInnerFace(sim: GSnake) {
+  const neck = neckOf(sim);
+  return bodyTouches(sim, headOf(sim), neck) > 0;
+}
+
+function floodSize(sim: GSnake, start: Point, limit = 160) {
   if (!isOpen(sim, start) && !eq(start, headOf(sim))) return 0;
-  const seen = new Set<string>([keyOf(start)]);
-  const q: Point[] = [start];
-  if (!isOpen(sim, start)) {
-    seen.clear();
-    q.length = 0;
-    for (const dir of DIRS) {
-      const n = cellAt(start, dir);
-      if (!isOpen(sim, n)) continue;
-      seen.add(keyOf(n));
-      q.push(n);
+  const seen = new Set<string>();
+  const q: Point[] = [];
+  const push = (p: Point) => {
+    if (!isOpen(sim, p) && !eq(p, start)) return;
+    const id = keyOf(p);
+    if (seen.has(id)) return;
+    if (!isOpen(sim, p) && eq(p, start)) {
+      for (const dir of DIRS) push(cellAt(p, dir));
+      return;
     }
-  }
+    seen.add(id);
+    q.push(p);
+  };
+  push(start);
   for (let i = 0; i < q.length && seen.size < limit; i += 1) {
-    for (const dir of DIRS) {
-      const n = cellAt(q[i], dir);
-      const id = keyOf(n);
-      if (seen.has(id) || !isOpen(sim, n)) continue;
-      seen.add(id);
-      q.push(n);
-    }
+    for (const dir of DIRS) push(cellAt(q[i], dir));
   }
   return seen.size;
 }
@@ -254,7 +259,38 @@ function isTunnel(sim: GSnake, p: Point) {
   return false;
 }
 
-function huntDir(sim: GSnake): Direction | null {
+function fillRatio(sim: GSnake) {
+  return sim.snake.length / (sim.cols * sim.rows);
+}
+
+function maxRun(sim: GSnake) {
+  const fill = fillRatio(sim);
+  if (fill > 0.6) return 3;
+  if (fill > 0.35) return 5;
+  return 8;
+}
+
+function spanAhead(sim: GSnake) {
+  let n = 0;
+  let p = headOf(sim);
+  for (let i = 0; i < 12; i += 1) {
+    p = cellAt(p, sim.direc);
+    if (!isOpen(sim, p)) break;
+    n += 1;
+  }
+  return n;
+}
+
+function huntSafe(sim: GSnake, path: Direction[]) {
+  if (path.length === 0) return false;
+  const copy = cloneSim(sim);
+  for (const dir of path) {
+    if (!moveSim(copy, dir)) return false;
+  }
+  return shortestPath(copy, tailOf(copy)).length > 0;
+}
+
+function nibbleDir(sim: GSnake): Direction | null {
   const facing = sim.direc;
   for (const dir of safeDirs(sim)) {
     if (isFood(sim, cellAt(headOf(sim), dir))) return dir;
@@ -263,18 +299,15 @@ function huntDir(sim: GSnake): Direction | null {
   const foods = sim.foods
     .slice()
     .sort((a, b) => manhattan(headOf(sim), a) - manhattan(headOf(sim), b));
+  const fill = fillRatio(sim);
+  const maxCut = fill > 0.5 ? 4 : 8;
+
   for (const food of foods) {
+    const dist = manhattan(headOf(sim), food);
+    if (dist > maxCut) continue;
     const path = shortestPath(sim, food);
-    if (path.length === 0) continue;
-    const copy = cloneSim(sim);
-    let ok = true;
-    for (const dir of path) {
-      if (!moveSim(copy, dir)) {
-        ok = false;
-        break;
-      }
-    }
-    if (!ok || shortestPath(copy, tailOf(copy)).length === 0) continue;
+    if (path.length === 0 || path.length > dist + 1) continue;
+    if (!huntSafe(sim, path)) continue;
     const dir = path[0];
     if (!dir || dir === OPPOSITE[facing] || !keepsTail(sim, dir)) continue;
     return dir;
@@ -286,30 +319,53 @@ function packDir(sim: GSnake): Direction | null {
   const head = headOf(sim);
   const facing = sim.direc;
   const run = currentRun(sim);
+  const cap = Math.min(maxRun(sim), Math.max(2, spanAhead(sim)));
   const opts = safeDirs(sim);
   if (opts.length === 0) return null;
 
   let best: { dir: Direction; score: number } | null = null;
   for (const dir of opts) {
     const cell = cellAt(head, dir);
-    const room = floodSize(sim, cell);
     const after = roomAfter(sim, dir);
     const touches = bodyTouches(sim, cell, head);
     const tunnel = isTunnel(sim, cell);
     const opens = DIRS.filter((d) => isOpen(sim, cellAt(cell, d))).length;
     const turn = dir !== facing;
     const horiz = dir === "left" || dir === "right";
-    let score = after * 4 + room * 2 + touches * 8 + opens * 10;
-    if (tunnel && room > 8) score -= 50;
-    if (opens <= 1 && room > 8) score -= 40;
-    if (!turn && touches >= 1 && run < 4) score += 18;
-    if (!turn && run >= 4) score -= 45;
-    if (turn && touches >= 1 && run >= 2 && run <= 4) score += 30;
-    if (turn && run < 2 && touches < 2) score -= 12;
-    if (horiz) score += 8;
+    let score = after * 5 + touches * 16 + opens * 8;
+    if (dir === facing) score += 28;
+    if (!turn && touches >= 1 && run < cap) score += 22;
+    if (!turn && run >= cap) score -= 50;
+    if (turn && touches >= 1 && (run >= cap || spanAhead(sim) === 0)) score += 40;
+    if (turn && run < 2 && touches < 2) score -= 18;
+    if (tunnel && after > 10) score -= 55;
+    if (opens <= 1 && after > 10) score -= 40;
+    if (horiz && fillRatio(sim) < 0.55) score += 6;
     if (!best || score > best.score) best = { dir, score };
   }
   return best?.dir ?? null;
+}
+
+function midStroke(sim: GSnake) {
+  if (!onInnerFace(sim)) return false;
+  const facing = sim.direc;
+  if (!keepsTail(sim, facing) || !canStep(sim, facing)) return false;
+  return currentRun(sim) < Math.min(maxRun(sim), Math.max(2, spanAhead(sim)));
+}
+
+function anySafeHunt(sim: GSnake): Direction | null {
+  const facing = sim.direc;
+  const foods = sim.foods
+    .slice()
+    .sort((a, b) => manhattan(headOf(sim), a) - manhattan(headOf(sim), b));
+  for (const food of foods) {
+    const path = shortestPath(sim, food);
+    if (path.length === 0 || !huntSafe(sim, path)) continue;
+    const dir = path[0];
+    if (!dir || dir === OPPOSITE[facing] || !keepsTail(sim, dir)) continue;
+    return dir;
+  }
+  return null;
 }
 
 function pickDir(state: GameState): Direction {
@@ -317,8 +373,18 @@ function pickDir(state: GameState): Direction {
   const opts = legalDirs(sim);
   if (opts.length === 0) return sim.direc;
 
-  const hunt = huntDir(sim);
-  if (hunt) return hunt;
+  for (const dir of safeDirs(sim)) {
+    if (isFood(sim, cellAt(headOf(sim), dir))) return dir;
+  }
+
+  const packing = onInnerFace(sim) && fillRatio(sim) >= 0.12;
+  if (!packing) {
+    const hunt = anySafeHunt(sim);
+    if (hunt) return hunt;
+  } else if (!midStroke(sim)) {
+    const nibble = nibbleDir(sim);
+    if (nibble) return nibble;
+  }
 
   const pack = packDir(sim);
   if (pack) return pack;
