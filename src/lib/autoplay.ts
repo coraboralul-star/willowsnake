@@ -32,17 +32,8 @@ function dirBetween(from: Point, to: Point): Direction | null {
   return null;
 }
 
-function manhattan(a: Point, b: Point) {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-}
-
 function fwd(from: number, to: number, n: number) {
   return (to - from + n) % n;
-}
-
-function willGrow(state: GameState, cell: Point) {
-  if (state.pendingGrow > 0) return true;
-  return state.foods.some((food) => food.x === cell.x && food.y === cell.y);
 }
 
 function isClear(state: GameState, cell: Point, growing: boolean) {
@@ -50,6 +41,23 @@ function isClear(state: GameState, cell: Point, growing: boolean) {
     if (!growing && i === state.snake.length - 1) return false;
     return part.x === cell.x && part.y === cell.y;
   });
+}
+
+function isFood(state: GameState, cell: Point) {
+  return state.foods.some((food) => food.x === cell.x && food.y === cell.y);
+}
+
+function aheadOfTail(
+  headI: number,
+  cellI: number,
+  tailI: number,
+  n: number,
+  growing: boolean,
+) {
+  const distNext = fwd(headI, cellI, n);
+  const distTail = fwd(headI, tailI, n);
+  if (distNext === 0) return false;
+  return growing ? distNext < distTail : distNext <= distTail;
 }
 
 export function pickAutoplayDir(state: GameState): Direction {
@@ -65,52 +73,27 @@ export function pickAutoplayDir(state: GameState): Direction {
   const tailI = state.cycleIndex[tail.y]?.[tail.x];
   if (headI == null || tailI == null || headI < 0 || tailI < 0) return cycleDir;
 
-  const distTail = fwd(headI, tailI, n);
-  type Target = { food: Point; along: number; man: number };
-  const targets: Target[] = [];
-  for (const food of state.foods) {
-    const appleI = state.cycleIndex[food.y]?.[food.x];
-    if (appleI == null || appleI < 0) continue;
-    const along = fwd(headI, appleI, n);
-    if (along === 0 || along >= distTail) continue;
-    targets.push({ food, along, man: manhattan(head, food) });
-  }
-  if (targets.length === 0) return cycleDir;
-
-  targets.sort((a, b) => {
-    const rank = (t: Target) => (t.man <= 1 ? 0 : t.man <= 2 ? 1 : t.man <= 4 ? 2 : 3);
-    const ra = rank(a);
-    const rb = rank(b);
-    if (ra !== rb) return ra - rb;
-    return a.along - b.along;
-  });
-  const apple = targets[0];
-  const skip = apple.man <= 2 ? distTail : apple.man <= 4 ? Math.min(distTail, 80) : Math.min(distTail - 1, 32);
-
-  let best: Direction | null = null;
-  let bestLeft = apple.along;
+  let eat: Direction | null = null;
+  let eatAlong = Infinity;
 
   for (const dir of DIRS) {
     if (dir === OPPOSITE[state.direction]) continue;
     const cell = { x: head.x + DELTA[dir].x, y: head.y + DELTA[dir].y };
     if (cell.x < 0 || cell.y < 0 || cell.x >= state.cols || cell.y >= state.rows) continue;
-    const growing = willGrow(state, cell);
+    if (!isFood(state, cell)) continue;
+    const growing = true;
     if (!isClear(state, cell, growing)) continue;
-
     const cellI = state.cycleIndex[cell.y]?.[cell.x];
     if (cellI == null || cellI < 0) continue;
-    const distNext = fwd(headI, cellI, n);
-    if (distNext === 0 || distNext > skip) continue;
-    if (growing ? distNext >= distTail : distNext > distTail) continue;
-
-    const left = fwd(cellI, state.cycleIndex[apple.food.y][apple.food.x], n);
-    if (left < bestLeft) {
-      bestLeft = left;
-      best = dir;
+    if (!aheadOfTail(headI, cellI, tailI, n, growing)) continue;
+    const along = fwd(headI, cellI, n);
+    if (along < eatAlong) {
+      eatAlong = along;
+      eat = dir;
     }
   }
 
-  return best ?? cycleDir;
+  return eat ?? cycleDir;
 }
 
 export function applyAutoplayDir(state: GameState, dir: Direction): GameState {
