@@ -10,6 +10,7 @@ import {
 } from "@/lib/engine";
 
 let autoplayOn = false;
+let recentHeads: string[] = [];
 
 export function isAutoplay() {
   return autoplayOn;
@@ -19,9 +20,23 @@ export function enableAutoplay() {
   autoplayOn = true;
 }
 
-export function autoplayOnNewRun(_tickMs = BASE_TICK) {}
+export function autoplayOnNewRun(_tickMs = BASE_TICK) {
+  recentHeads = [];
+}
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
+const LEFT: Record<Direction, Direction> = {
+  up: "left",
+  left: "down",
+  down: "right",
+  right: "up",
+};
+const RIGHT: Record<Direction, Direction> = {
+  up: "right",
+  right: "down",
+  down: "left",
+  left: "up",
+};
 
 function keyOf(p: Point) {
   return `${p.x},${p.y}`;
@@ -43,6 +58,10 @@ function dirBetween(from: Point, to: Point): Direction | null {
   if (dy === 1 && dx === 0) return "down";
   if (dy === -1 && dx === 0) return "up";
   return null;
+}
+
+function manhattan(a: Point, b: Point) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
 function inBounds(state: GameState, p: Point) {
@@ -155,72 +174,325 @@ function stepSim(sim: Sim, next: Point): Sim | null {
   return nextSim;
 }
 
-function cycleLen(state: GameState) {
-  return state.cols * state.rows;
+function pathTo(sim: Sim, goal: Point, noGo: Direction | null): Point[] | null {
+  const head = sim.snake[0];
+  if (eq(head, goal)) return [];
+  const blocked = simBlocked(sim, sim.pendingGrow > 0);
+  const prev = new Map<string, Point>();
+  const q: Point[] = [];
+
+  for (const dir of DIRS) {
+    if (dir === noGo) continue;
+    const p = cellAt(head, dir);
+    if (!simInBounds(sim, p) || blocked.has(keyOf(p))) continue;
+    prev.set(keyOf(p), head);
+    q.push(p);
+    if (eq(p, goal)) return [p];
+  }
+
+  let i = 0;
+  while (i < q.length) {
+    const cur = q[i];
+    i += 1;
+    for (const dir of DIRS) {
+      const p = cellAt(cur, dir);
+      const id = keyOf(p);
+      if (!simInBounds(sim, p) || blocked.has(id) || prev.has(id)) continue;
+      prev.set(id, cur);
+      q.push(p);
+      if (eq(p, goal)) {
+        const path: Point[] = [p];
+        let at: Point | undefined = cur;
+        while (at && !eq(at, head)) {
+          path.push(at);
+          at = prev.get(keyOf(at));
+        }
+        path.reverse();
+        return path;
+      }
+    }
+  }
+  return null;
 }
 
-function idxOf(state: GameState, cell: Point) {
-  return state.cycleIndex[cell.y]?.[cell.x] ?? -1;
+function pathSafe(state: GameState, path: Point[]) {
+  let sim = toSim(state);
+  for (const cell of path) {
+    const next = stepSim(sim, cell);
+    if (!next) return false;
+    sim = next;
+  }
+  return true;
 }
 
-function cycleDist(state: GameState, from: Point, to: Point) {
-  const n = cycleLen(state);
-  const a = idxOf(state, from);
-  const b = idxOf(state, to);
-  if (a < 0 || b < 0) return n;
-  return (b - a + n) % n;
+function firstSafeDir(state: GameState, path: Point[] | null): Direction | null {
+  if (!path || path.length === 0) return null;
+  if (!pathSafe(state, path)) return null;
+  const dir = dirBetween(state.snake[0], path[0]);
+  if (!dir || dir === OPPOSITE[state.direction] || wouldDie(state, dir)) return null;
+  return dir;
 }
 
-function spaceToTail(state: GameState) {
-  const n = cycleLen(state);
-  const d = cycleDist(state, state.snake[0], state.snake[state.snake.length - 1]);
-  return d === 0 ? n : d;
-}
-
-function targetApple(state: GameState) {
-  const space = spaceToTail(state);
+function huntDir(state: GameState): Direction | null {
+  const noGo = OPPOSITE[state.direction];
   const head = state.snake[0];
-  const ahead = state.foods
-    .map((food) => ({ food, dist: cycleDist(state, head, food) }))
-    .filter((item) => item.dist > 0 && item.dist < space)
-    .sort((a, b) => a.dist - b.dist);
-  return ahead[0]?.food ?? null;
+  const apples = state.foods
+    .slice()
+    .sort((a, b) => manhattan(head, a) - manhattan(head, b) || a.x - b.x);
+  const sim0 = toSim(state);
+
+  for (const apple of apples) {
+    const path = pathTo(sim0, apple, noGo);
+    const dir = firstSafeDir(state, path);
+    if (dir) return dir;
+  }
+  return null;
 }
 
-function tryMove(state: GameState, dir: Direction) {
+function snakeSet(state: GameState) {
+  return new Set(state.snake.map(keyOf));
+}
+
+function coverCount(state: GameState, keys: Set<string>, cell: Point) {
+  let n = 0;
+  for (const dir of DIRS) {
+    const p = cellAt(cell, dir);
+    if (!inBounds(state, p) || keys.has(keyOf(p))) n += 1;
+  }
+  return n;
+}
+
+function emptySpan(
+  state: GameState,
+  keys: Set<string>,
+  cell: Point,
+  horizontal: boolean,
+) {
+  let lo = horizontal ? cell.x : cell.y;
+  let hi = lo;
+  const max = horizontal ? state.cols - 1 : state.rows - 1;
+  const emptyAt = (v: number) => {
+    const p = horizontal ? { x: v, y: cell.y } : { x: cell.x, y: v };
+    return inBounds(state, p) && !keys.has(keyOf(p));
+  };
+  const blockedByBody = (v: number) => {
+    if (v < 0 || v > max) return false;
+    const p = horizontal ? { x: v, y: cell.y } : { x: cell.x, y: v };
+    return keys.has(keyOf(p));
+  };
+  while (lo > 0 && emptyAt(lo - 1)) lo -= 1;
+  while (hi < max && emptyAt(hi + 1)) hi += 1;
+  const bodyEnds = (blockedByBody(lo - 1) ? 1 : 0) + (blockedByBody(hi + 1) ? 1 : 0);
+  return { lo, hi, len: hi - lo + 1, bodyEnds };
+}
+
+function spanIsHole(
+  h: { len: number; bodyEnds: number },
+  v: { len: number; bodyEnds: number },
+) {
+  if (h.bodyEnds === 2 && h.len <= 8) return true;
+  if (v.bodyEnds === 2 && v.len >= 3 && v.len <= 12) return true;
+  return false;
+}
+
+function isTightCell(state: GameState, keys: Set<string>, cell: Point) {
+  if (!inBounds(state, cell) || keys.has(keyOf(cell))) return false;
+  return spanIsHole(emptySpan(state, keys, cell, true), emptySpan(state, keys, cell, false));
+}
+
+function tightFlood(state: GameState, keys: Set<string>, start: Point) {
+  if (!isTightCell(state, keys, start)) return 0;
+  const seen = new Set<string>([keyOf(start)]);
+  const q: Point[] = [start];
+  for (let i = 0; i < q.length; i += 1) {
+    for (const dir of DIRS) {
+      const n = cellAt(q[i], dir);
+      const id = keyOf(n);
+      if (seen.has(id) || !isTightCell(state, keys, n)) continue;
+      seen.add(id);
+      q.push(n);
+    }
+  }
+  return seen.size;
+}
+
+function noteHead(state: GameState) {
+  recentHeads.push(keyOf(state.snake[0]));
+  if (recentHeads.length > 40) recentHeads.shift();
+}
+
+function looping() {
+  if (recentHeads.length < 16) return false;
+  const slice = recentHeads.slice(-20);
+  const unique = new Set(slice);
+  if (slice.length >= 16 && unique.size <= 8) return true;
+  const cur = recentHeads[recentHeads.length - 1];
+  return slice.slice(0, -1).filter((k) => k === cur).length >= 2;
+}
+
+function recentlyAt(cell: Point, within = 12) {
+  const id = keyOf(cell);
+  return recentHeads.slice(-within).includes(id);
+}
+
+function currentRun(state: GameState) {
+  const d = state.direction;
+  let n = 1;
+  for (let i = 0; i < state.snake.length - 1; i += 1) {
+    if (dirBetween(state.snake[i + 1], state.snake[i]) !== d) break;
+    n += 1;
+  }
+  return n;
+}
+
+function isHoriz(dir: Direction) {
+  return dir === "left" || dir === "right";
+}
+
+function inLocalHole(state: GameState, keys: Set<string>) {
+  const head = state.snake[0];
+  const h = emptySpan(state, keys, head, true);
+  const v = emptySpan(state, keys, head, false);
+  const openRoom = Math.max(h.len, v.len) >= 10 && (h.bodyEnds < 2 || v.bodyEnds < 2);
+  if (openRoom) return false;
+  return spanIsHole(h, v);
+}
+
+function tryStep(state: GameState, dir: Direction) {
   if (dir === OPPOSITE[state.direction] || wouldDie(state, dir)) return false;
   return Boolean(stepSim(toSim(state), cellAt(state.snake[0], dir)));
 }
 
-function cycleMoveDir(state: GameState): Direction | null {
+function gapFillDir(state: GameState): Direction | null {
   const head = state.snake[0];
-  const space = spaceToTail(state);
-  const apple = targetApple(state);
-  const rails = state.cycleNext[head.y]?.[head.x];
-  let best: { dir: Direction; dist: number; skip: number } | null = null;
+  const keys = snakeSet(state);
+  const hRun = emptySpan(state, keys, head, true);
+  const vRun = emptySpan(state, keys, head, false);
+  if (!spanIsHole(hRun, vRun)) return null;
+  const useH = !(hRun.len <= 2 && vRun.len >= 3);
+  const run = currentRun(state);
 
+  let best: { dir: Direction; score: number } | null = null;
   for (const dir of DIRS) {
-    if (!tryMove(state, dir)) continue;
+    if (!tryStep(state, dir)) continue;
     const cell = cellAt(head, dir);
-    const skip = cycleDist(state, head, cell);
-    if (skip === 0 || skip >= space) continue;
-    const dist = apple ? cycleDist(state, cell, apple) : skip;
-    if (
-      !best ||
-      dist < best.dist ||
-      (dist === best.dist && skip < best.skip) ||
-      (dist === best.dist && skip === best.skip && rails && eq(cell, rails))
-    ) {
-      best = { dir, dist, skip };
+    const h = emptySpan(state, keys, cell, true);
+    const v = emptySpan(state, keys, cell, false);
+    const hole = tightFlood(state, keys, cell);
+    const horizMove = isHoriz(dir);
+    let along = 0;
+    let fold = 0;
+    if (useH) {
+      if (dir === "right" && head.x < hRun.hi) along = 1;
+      if (dir === "left" && head.x > hRun.lo) along = 1;
+      if ((head.x === hRun.lo || head.x === hRun.hi) && (dir === "up" || dir === "down")) fold = 1;
+    } else {
+      if (dir === "down" && head.y < vRun.hi) along = 1;
+      if (dir === "up" && head.y > vRun.lo) along = 1;
+      if ((head.y === vRun.lo || head.y === vRun.hi) && isHoriz(dir)) fold = 1;
     }
+    const shortVert =
+      !horizMove &&
+      ((dir === state.direction && run < 3 && vRun.len < 3) ||
+        (dir !== state.direction && isHoriz(state.direction) && fold === 0 && v.len < 3));
+    const score =
+      (hole > 0 ? 70 - hole : 0) +
+      (horizMove ? 18 : 0) +
+      along * 28 +
+      fold * 40 -
+      (shortVert ? 55 : 0) -
+      (recentlyAt(cell, 10) ? 90 : 0);
+    if (!best || score > best.score) best = { dir, score };
   }
   return best?.dir ?? null;
 }
 
+function openDir(state: GameState): Direction | null {
+  const head = state.snake[0];
+  const keys = snakeSet(state);
+  const apple = state.foods
+    .slice()
+    .sort((a, b) => manhattan(head, a) - manhattan(head, b))[0];
+  let best: { dir: Direction; score: number } | null = null;
+  for (const dir of DIRS) {
+    if (!tryStep(state, dir)) continue;
+    const cell = cellAt(head, dir);
+    const h = emptySpan(state, keys, cell, true);
+    const v = emptySpan(state, keys, cell, false);
+    const covers = coverCount(state, keys, cell);
+    const room = Math.min(h.len, v.len);
+    const toward = apple ? manhattan(head, apple) - manhattan(cell, apple) : 0;
+    const score =
+      toward * 30 +
+      room * 3 +
+      (covers === 0 ? 40 : 0) -
+      covers * 18 +
+      (isHoriz(dir) ? 8 : 0) +
+      (dir === state.direction ? 10 : 0) -
+      (recentlyAt(cell, 10) ? 80 : 0);
+    if (!best || score > best.score) best = { dir, score };
+  }
+  return best?.dir ?? null;
+}
+
+function tailOutDir(state: GameState): Direction | null {
+  const facing = state.direction;
+  const noGo = OPPOSITE[facing];
+  const order = [LEFT[facing], facing, RIGHT[facing], noGo];
+  const tail = state.snake[state.snake.length - 1];
+  const head = state.snake[0];
+  let best: { dir: Direction; score: number } | null = null;
+
+  for (let i = 0; i < order.length; i += 1) {
+    const dir = order[i];
+    if (dir === noGo && i < 3) continue;
+    if (wouldDie(state, dir)) continue;
+    const cell = cellAt(head, dir);
+    if (!stepSim(toSim(state), cell)) continue;
+    const score = (4 - i) * 20 - manhattan(cell, tail);
+    if (!best || score > best.score) best = { dir, score };
+  }
+  return best?.dir ?? null;
+}
+
+function cycleFallback(state: GameState): Direction | null {
+  const head = state.snake[0];
+  const nxt = state.cycleNext[head.y]?.[head.x];
+  const dir = nxt ? dirBetween(head, nxt) : null;
+  if (!dir || dir === OPPOSITE[state.direction] || wouldDie(state, dir)) return null;
+  if (!stepSim(toSim(state), cellAt(head, dir))) return null;
+  return dir;
+}
+
 export function pickAutoplayDir(state: GameState): Direction {
   const facing = state.queued.at(-1) ?? state.direction;
-  const cycle = cycleMoveDir(state);
-  if (cycle) return cycle;
+  noteHead(state);
+
+  for (const dir of DIRS) {
+    if (dir === OPPOSITE[state.direction]) continue;
+    const cell = cellAt(state.snake[0], dir);
+    if (!isFood(state, cell) || wouldDie(state, dir)) continue;
+    if (stepSim(toSim(state), cell)) return dir;
+  }
+
+  const keys = snakeSet(state);
+  if (!looping() && inLocalHole(state, keys)) {
+    const holeFill = gapFillDir(state);
+    if (holeFill) return holeFill;
+  }
+
+  const hunt = huntDir(state);
+  if (hunt) return hunt;
+
+  const open = openDir(state);
+  if (open) return open;
+
+  const out = tailOutDir(state);
+  if (out) return out;
+
+  const rails = cycleFallback(state);
+  if (rails) return rails;
+
   for (const dir of DIRS) {
     if (dir === OPPOSITE[state.direction]) continue;
     if (!wouldDie(state, dir)) return dir;
