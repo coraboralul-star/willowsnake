@@ -34,8 +34,6 @@ const RIGHT: Record<Direction, Direction> = {
   down: "left",
   left: "up",
 };
-const CARPET = 6;
-const FILL_SWEEP = 0.55;
 
 function keyOf(p: Point) {
   return `${p.x},${p.y}`;
@@ -242,8 +240,22 @@ function huntDir(state: GameState): Direction | null {
   return null;
 }
 
+function snakeSet(state: GameState) {
+  return new Set(state.snake.map(keyOf));
+}
+
+function openCount(state: GameState, cell: Point) {
+  const blocked = snakeSet(state);
+  let n = 0;
+  for (const dir of DIRS) {
+    const p = cellAt(cell, dir);
+    if (inBounds(state, p) && !blocked.has(keyOf(p))) n += 1;
+  }
+  return n;
+}
+
 function bodyHugs(state: GameState, cell: Point) {
-  const keys = new Set(state.snake.map(keyOf));
+  const keys = snakeSet(state);
   let n = 0;
   for (const dir of DIRS) {
     if (keys.has(keyOf(cellAt(cell, dir)))) n += 1;
@@ -251,12 +263,82 @@ function bodyHugs(state: GameState, cell: Point) {
   return n;
 }
 
-function sweepDir(state: GameState): Direction | null {
+function reachableEmpty(state: GameState): Point[] {
+  const sim = toSim(state);
+  const blocked = simBlocked(sim, sim.pendingGrow > 0);
+  const area = floodFrom(sim, state.snake[0], blocked);
+  const out: Point[] = [];
+  for (const id of area) {
+    const [x, y] = id.split(",").map(Number);
+    out.push({ x, y });
+  }
+  return out;
+}
+
+function dirToGoal(state: GameState, goal: Point): Direction | null {
+  const noGo = OPPOSITE[state.direction];
+  const path = pathTo(toSim(state), goal, noGo);
+  if (!path || path.length === 0) return null;
+  if (!pathSafe(state, path)) return null;
+  const dir = dirBetween(state.snake[0], path[0]);
+  if (!dir || dir === noGo || wouldDie(state, dir)) return null;
+  return dir;
+}
+
+function gapHuntDir(state: GameState): Direction | null {
+  const head = state.snake[0];
+  const cells = reachableEmpty(state).filter((cell) => !eq(cell, head));
+  if (cells.length === 0) return null;
+
+  const interiors = cells.filter((cell) => openCount(state, cell) >= 3);
+  const goals = (interiors.length > 0 ? interiors : cells.filter((cell) => openCount(state, cell) >= 2)).slice();
+  if (goals.length === 0) return null;
+
+  goals.sort((a, b) => {
+    const sa = openCount(state, a) * 5 - manhattan(head, a);
+    const sb = openCount(state, b) * 5 - manhattan(head, b);
+    return sb - sa;
+  });
+
+  for (const goal of goals.slice(0, 10)) {
+    const dir = dirToGoal(state, goal);
+    if (dir) return dir;
+  }
+  return null;
+}
+
+function onCrust(state: GameState) {
+  const head = state.snake[0];
+  return bodyHugs(state, head) >= 2 || openCount(state, head) <= 2;
+}
+
+function tightFillDir(state: GameState): Direction | null {
+  const facing = state.direction;
+  const noGo = OPPOSITE[facing];
+  const head = state.snake[0];
+  let best: { dir: Direction; score: number } | null = null;
+
+  for (const dir of DIRS) {
+    if (dir === noGo) continue;
+    if (wouldDie(state, dir)) continue;
+    const cell = cellAt(head, dir);
+    if (!stepSim(toSim(state), cell)) continue;
+    const open = openCount(state, cell);
+    const hug = bodyHugs(state, cell);
+    if (hug >= 3 && open <= 1) continue;
+    const turn = dir === facing ? 0 : 12;
+    const score = open * 16 - hug * 18 + turn;
+    if (!best || score > best.score) best = { dir, score };
+  }
+  return best?.dir ?? null;
+}
+
+function tailOutDir(state: GameState): Direction | null {
   const facing = state.direction;
   const noGo = OPPOSITE[facing];
   const order = [LEFT[facing], facing, RIGHT[facing], noGo];
-  const head = state.snake[0];
   const tail = state.snake[state.snake.length - 1];
+  const head = state.snake[0];
   let best: { dir: Direction; score: number } | null = null;
 
   for (let i = 0; i < order.length; i += 1) {
@@ -265,9 +347,7 @@ function sweepDir(state: GameState): Direction | null {
     if (wouldDie(state, dir)) continue;
     const cell = cellAt(head, dir);
     if (!stepSim(toSim(state), cell)) continue;
-    const hug = bodyHugs(state, cell);
-    const toTail = manhattan(cell, tail);
-    const score = (4 - i) * 50 + hug * 10 - toTail;
+    const score = (4 - i) * 20 - manhattan(cell, tail);
     if (!best || score > best.score) best = { dir, score };
   }
   return best?.dir ?? null;
@@ -284,8 +364,6 @@ function cycleFallback(state: GameState): Direction | null {
 
 export function pickAutoplayDir(state: GameState): Direction {
   const facing = state.queued.at(-1) ?? state.direction;
-  const fill = state.snake.length / (state.cols * state.rows);
-  const carpeted = state.foods.length >= CARPET || fill >= FILL_SWEEP;
 
   for (const dir of DIRS) {
     if (dir === OPPOSITE[state.direction]) continue;
@@ -294,18 +372,24 @@ export function pickAutoplayDir(state: GameState): Direction {
     if (stepSim(toSim(state), cell)) return dir;
   }
 
-  if (!carpeted) {
-    const hunt = huntDir(state);
-    if (hunt) return hunt;
+  const hunt = huntDir(state);
+  if (hunt) return hunt;
+
+  if (onCrust(state)) {
+    const gap = gapHuntDir(state);
+    if (gap) return gap;
+  } else {
+    const fill = tightFillDir(state);
+    if (fill) return fill;
+    const gap = gapHuntDir(state);
+    if (gap) return gap;
   }
 
-  const sweep = sweepDir(state);
-  if (sweep) return sweep;
+  const fill = tightFillDir(state);
+  if (fill) return fill;
 
-  if (carpeted) {
-    const hunt = huntDir(state);
-    if (hunt) return hunt;
-  }
+  const out = tailOutDir(state);
+  if (out) return out;
 
   const rails = cycleFallback(state);
   if (rails) return rails;
