@@ -9,8 +9,9 @@ import {
   type Point,
 } from "@/lib/engine";
 
-// Pack against the body into the open room. Never walk toward the tail.
-// Hunt if a path to fruit exists and does not die.
+// Hunt if the whole route still leaves a path to the tail.
+// Otherwise pack into the open room, but only with moves that stay safe.
+// The tail is a safety check, never a destination.
 
 let autoplayOn = false;
 
@@ -174,10 +175,20 @@ function legalDirs(sim: GSnake) {
   return DIRS.filter((dir) => dir !== OPPOSITE[sim.direc] && canStep(sim, dir));
 }
 
+function keepsTail(sim: GSnake, dir: Direction) {
+  const copy = cloneSim(sim);
+  if (!moveSim(copy, dir)) return false;
+  return shortestPath(copy, tailOf(copy)).length > 0;
+}
+
 function roomAfter(sim: GSnake, dir: Direction) {
   const copy = cloneSim(sim);
   if (!moveSim(copy, dir)) return 0;
   return floodSize(copy, headOf(copy));
+}
+
+function safeDirs(sim: GSnake) {
+  return legalDirs(sim).filter((dir) => keepsTail(sim, dir));
 }
 
 function dirBetween(from: Point, to: Point): Direction | null {
@@ -245,7 +256,7 @@ function isTunnel(sim: GSnake, p: Point) {
 
 function huntDir(sim: GSnake): Direction | null {
   const facing = sim.direc;
-  for (const dir of legalDirs(sim)) {
+  for (const dir of safeDirs(sim)) {
     if (isFood(sim, cellAt(headOf(sim), dir))) return dir;
   }
 
@@ -255,7 +266,6 @@ function huntDir(sim: GSnake): Direction | null {
   for (const food of foods) {
     const path = shortestPath(sim, food);
     if (path.length === 0) continue;
-    if (path.length > manhattan(headOf(sim), food) + 2) continue;
     const copy = cloneSim(sim);
     let ok = true;
     for (const dir of path) {
@@ -264,11 +274,9 @@ function huntDir(sim: GSnake): Direction | null {
         break;
       }
     }
-    if (!ok || floodSize(copy, headOf(copy)) < 16) continue;
-    if (path.length > manhattan(headOf(sim), food) + 2) continue;
+    if (!ok || shortestPath(copy, tailOf(copy)).length === 0) continue;
     const dir = path[0];
-    if (!dir || dir === OPPOSITE[facing] || !canStep(sim, dir)) continue;
-    if (roomAfter(sim, dir) < 12) continue;
+    if (!dir || dir === OPPOSITE[facing] || !keepsTail(sim, dir)) continue;
     return dir;
   }
   return null;
@@ -278,23 +286,22 @@ function packDir(sim: GSnake): Direction | null {
   const head = headOf(sim);
   const facing = sim.direc;
   const run = currentRun(sim);
-  const opts = legalDirs(sim);
+  const opts = safeDirs(sim);
   if (opts.length === 0) return null;
 
   let best: { dir: Direction; score: number } | null = null;
   for (const dir of opts) {
     const cell = cellAt(head, dir);
     const room = floodSize(sim, cell);
+    const after = roomAfter(sim, dir);
     const touches = bodyTouches(sim, cell, head);
     const tunnel = isTunnel(sim, cell);
     const opens = DIRS.filter((d) => isOpen(sim, cellAt(cell, d))).length;
     const turn = dir !== facing;
     const horiz = dir === "left" || dir === "right";
-    if (tunnel && room > 8) continue;
-    if (opens <= 1 && room > 8) continue;
-    const after = roomAfter(sim, dir);
-    if (after < 12 && room > 8) continue;
-    let score = after * 3 + touches * 10 + opens * 14;
+    let score = after * 4 + room * 2 + touches * 8 + opens * 10;
+    if (tunnel && room > 8) score -= 50;
+    if (opens <= 1 && room > 8) score -= 40;
     if (!turn && touches >= 1 && run < 4) score += 18;
     if (!turn && run >= 4) score -= 45;
     if (turn && touches >= 1 && run >= 2 && run <= 4) score += 30;
@@ -316,8 +323,18 @@ function pickDir(state: GameState): Direction {
   const pack = packDir(sim);
   if (pack) return pack;
 
-  for (const dir of opts) {
-    if (roomAfter(sim, dir) >= 12) return dir;
+  const safe = safeDirs(sim);
+  if (safe.length > 0) {
+    let best = safe[0];
+    let bestRoom = -1;
+    for (const dir of safe) {
+      const room = roomAfter(sim, dir);
+      if (room > bestRoom) {
+        best = dir;
+        bestRoom = room;
+      }
+    }
+    return best;
   }
   return opts[0];
 }
