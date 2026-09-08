@@ -18,7 +18,7 @@ export function enableAutoplay() {
   autoplayOn = true;
 }
 
-export function autoplayOnNewRun(_tickMs = 114) {}
+export function autoplayOnNewRun(_tickMs = 104) {}
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
 

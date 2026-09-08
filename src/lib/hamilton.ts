@@ -408,11 +408,37 @@ function tileFills(tw: number, th: number): Point[][] {
 
 function gridHamCycle(nx: number, ny: number): Point[] | null {
   if (nx < 2 || ny < 2) return null;
-  if (ny % 2 === 0) return cycleEvenHeight(nx, ny);
+  // Walk along rows of tiles first so 1x1 folds repeat across the board
+  // instead of one long vertical strip down the left.
   if (nx % 2 === 0) {
     return cycleEvenHeight(ny, nx).map((p) => ({ x: p.y, y: p.x }));
   }
+  if (ny % 2 === 0) return cycleEvenHeight(nx, ny);
   return null;
+}
+
+function squareFills(): Point[][] {
+  const cw = [
+    { x: 0, y: 0 },
+    { x: 0, y: 1 },
+    { x: 1, y: 1 },
+    { x: 1, y: 0 },
+  ];
+  const out: Point[][] = [];
+  const seen = new Set<string>();
+  function add(order: Point[]) {
+    const key = order.map((p) => `${p.x},${p.y}`).join(">");
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(order);
+  }
+  let cur = cw;
+  for (let i = 0; i < 4; i += 1) {
+    add(cur);
+    add(reverseOrder(cur));
+    cur = cur.map((_, idx) => cur[(idx + 1) % 4]);
+  }
+  return out;
 }
 
 function cycleEvenHeight(nx: number, ny: number): Point[] {
@@ -465,7 +491,7 @@ function tiledSpiral(w: number, h: number, tw: number, th: number): Point[] | nu
   if (!tiles || tiles.length !== (w / tw) * (h / th)) return null;
   const boxes = tiles.map((t) => ({ ox: t.x * tw, oy: t.y * th }));
   const n = boxes.length;
-  const fills = tileFills(tw, th);
+  const fills = tw === 2 && th === 2 ? squareFills() : tileFills(tw, th);
   const starts = sharedEdge(boxes[0], boxes[n - 1], tw, th);
   const attempts = starts.length ? starts : [{ x: boxes[0].ox, y: boxes[0].oy }];
 
@@ -557,8 +583,12 @@ export function cycleKind() {
 
 export function generateCycleNext(w: number, h = w): Point[][] {
   lastCycleKind = "none";
-  let order = tiledSpiral(w, h, 4, 4);
-  if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x4";
+  let order = tiledSpiral(w, h, 2, 2);
+  if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-2x2";
+  if (!order || !isBoardCycle(order, w, h)) {
+    order = tiledSpiral(w, h, 4, 4);
+    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x4";
+  }
   if (!order || !isBoardCycle(order, w, h)) {
     order = tiledSpiral(w, h, 4, 6);
     if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x6";

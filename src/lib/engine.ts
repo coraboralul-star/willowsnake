@@ -5,8 +5,8 @@ export type Direction = "up" | "down" | "left" | "right";
 export type GameStatus = "idle" | "playing" | "paused" | "over" | "won";
 export const BOARD_COLS = 16;
 export const BOARD_ROWS = 24;
-export const TILE_W = 4;
-export const TILE_H = 4;
+export const TILE_W = 2;
+export const TILE_H = 2;
 
 export const KEY_TO_DIR: Record<string, Direction> = {
   w: "up",
@@ -63,7 +63,7 @@ export const OPPOSITE: Record<Direction, Direction> = {
   right: "left",
 };
 
-export const BASE_TICK = 114;
+export const BASE_TICK = 104;
 export const MIN_TICK = 55;
 export const NITRO_TICK = 55;
 export const SLOW_TICK = 180;
