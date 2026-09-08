@@ -9,14 +9,11 @@ import {
   type Point,
 } from "@/lib/engine";
 
-// Livecade-style: fill the leftover rectangle with full-span parallel strokes.
-// Fruit is adjacent-only once packing; tail is a safety check, never a destination.
+// Livecade ticks (files 7?9): ~75?83% straight, median run 2?4, p90 ~9?14.
+// Dominant turn is a perpendicular fold while the row is still open (span ~7?18).
+// Wall-to-wall is rare. Tail is a safety check, never a destination.
 
 let autoplayOn = false;
-let slabInto: Direction | null = null;
-let slabMode: "hunt" | "slab" = "hunt";
-let slabRowsLeft = 0;
-let slabSeenLen = 0;
 
 export function isAutoplay() {
   return autoplayOn;
@@ -26,12 +23,7 @@ export function enableAutoplay() {
   autoplayOn = true;
 }
 
-export function autoplayOnNewRun(_tickMs = BASE_TICK) {
-  slabInto = null;
-  slabMode = "hunt";
-  slabRowsLeft = 0;
-  slabSeenLen = 0;
-}
+export function autoplayOnNewRun(_tickMs = BASE_TICK) {}
 
 const DIRS: Direction[] = ["up", "down", "left", "right"];
 const LEFT: Record<Direction, Direction> = {
@@ -222,6 +214,24 @@ function currentRun(sim: GSnake) {
   return n;
 }
 
+function neckOf(sim: GSnake) {
+  return sim.snake[1];
+}
+
+function bodyTouches(sim: GSnake, p: Point, skip?: Point) {
+  let n = 0;
+  for (const dir of DIRS) {
+    const nbr = cellAt(p, dir);
+    if (skip && eq(nbr, skip)) continue;
+    if (inBounds(sim, nbr) && sim.body.has(keyOf(nbr))) n += 1;
+  }
+  return n;
+}
+
+function onBodyFace(sim: GSnake) {
+  return bodyTouches(sim, headOf(sim), neckOf(sim)) > 0;
+}
+
 function floodCells(sim: GSnake, start: Point, limit = sim.cols * sim.rows) {
   const cells: Point[] = [];
   if (!isOpen(sim, start) && !eq(start, headOf(sim))) return cells;
@@ -270,48 +280,6 @@ function spanIn(sim: GSnake, dir: Direction) {
   return n;
 }
 
-function prevSweep(sim: GSnake): Direction | null {
-  if (sim.snake.length < 3) return null;
-  return dirBetween(sim.snake[2], sim.snake[1]);
-}
-
-function emptyOnSide(sim: GSnake, dir: Direction) {
-  const head = headOf(sim);
-  let n = 0;
-  for (const p of floodCells(sim, head)) {
-    if (dir === "up" && p.y < head.y) n += 1;
-    else if (dir === "down" && p.y > head.y) n += 1;
-    else if (dir === "left" && p.x < head.x) n += 1;
-    else if (dir === "right" && p.x > head.x) n += 1;
-  }
-  return n;
-}
-
-function leftoverInto(sim: GSnake): Direction {
-  const facing = sim.direc;
-  const left = LEFT[facing];
-  const right = RIGHT[facing];
-  return emptyOnSide(sim, left) >= emptyOnSide(sim, right) ? left : right;
-}
-
-function courtyardFold(sim: GSnake): Direction | null {
-  const facing = sim.direc;
-  const perps = [LEFT[facing], RIGHT[facing]];
-  const preferred = slabInto && perps.includes(slabInto) ? slabInto : leftoverInto(sim);
-  const order = [preferred, OPPOSITE[preferred]].filter((dir) => perps.includes(dir));
-  let best: { dir: Direction; room: number } | null = null;
-  for (const dir of order) {
-    if (!keepsTail(sim, dir) || !canStep(sim, dir)) continue;
-    const room = roomAfter(sim, dir);
-    if (!best || room > best.room) best = { dir, room };
-  }
-  if (best) {
-    slabInto = best.dir;
-    return best.dir;
-  }
-  return null;
-}
-
 function huntSafe(sim: GSnake, path: Direction[]) {
   if (path.length === 0) return false;
   const copy = cloneSim(sim);
@@ -319,67 +287,6 @@ function huntSafe(sim: GSnake, path: Direction[]) {
     if (!moveSim(copy, dir)) return false;
   }
   return shortestPath(copy, tailOf(copy)).length > 0;
-}
-
-function strokeDir(sim: GSnake): Direction | null {
-  const opts = safeDirs(sim);
-  if (opts.length === 0) return null;
-  const facing = sim.direc;
-
-  if (slabInto && facing === slabInto && currentRun(sim) === 1) {
-    const prev = prevSweep(sim);
-    if (prev) {
-      const resume = OPPOSITE[prev];
-      if (opts.includes(resume)) return resume;
-    }
-  }
-
-  if (opts.includes(facing) && spanIn(sim, facing) > 0) {
-    if (fillRatio(sim) > 0.2) {
-      const ahead = roomAfter(sim, facing);
-      const into = leftoverInto(sim);
-      if (opts.includes(into)) {
-        const side = roomAfter(sim, into);
-        if (side > ahead + 40 && side > 40) {
-          slabInto = into;
-          return into;
-        }
-      }
-    }
-    return facing;
-  }
-  return null;
-}
-
-function packFallback(sim: GSnake): Direction | null {
-  const opts = safeDirs(sim);
-  if (opts.length === 0) return null;
-  const fold = courtyardFold(sim);
-  if (fold && opts.includes(fold)) {
-    const foldRoom = roomAfter(sim, fold);
-    let escape: Direction | null = null;
-    let escapeRoom = foldRoom + 20;
-    for (const dir of opts) {
-      const room = roomAfter(sim, dir);
-      if (room > escapeRoom) {
-        escape = dir;
-        escapeRoom = room;
-      }
-    }
-    if (escape) return escape;
-    return fold;
-  }
-
-  let best = opts[0];
-  let bestRoom = -1;
-  for (const dir of opts) {
-    const room = roomAfter(sim, dir);
-    if (room > bestRoom) {
-      best = dir;
-      bestRoom = room;
-    }
-  }
-  return best;
 }
 
 function anySafeHunt(sim: GSnake): Direction | null {
@@ -397,17 +304,41 @@ function anySafeHunt(sim: GSnake): Direction | null {
   return null;
 }
 
-function noteGrowth(sim: GSnake) {
-  if (slabSeenLen === 0) slabSeenLen = sim.snake.length;
-  if (sim.snake.length <= slabSeenLen) return;
-  slabSeenLen = sim.snake.length;
-  if (fillRatio(sim) >= 0.3) {
-    slabMode = "slab";
-    return;
+function packDir(sim: GSnake): Direction | null {
+  const opts = safeDirs(sim);
+  if (opts.length === 0) return null;
+  const head = headOf(sim);
+  const facing = sim.direc;
+  const fill = fillRatio(sim);
+  const run = currentRun(sim);
+  const hunt = anySafeHunt(sim);
+
+  let best: { dir: Direction; score: number } | null = null;
+  for (const dir of opts) {
+    const next = cellAt(head, dir);
+    const hug = bodyTouches(sim, next, head);
+    const room = roomAfter(sim, dir);
+    const span = spanIn(sim, dir);
+    const facingDir = dir === facing;
+    let score = hug * 22 + room * 0.4;
+    if (facingDir) score += 14;
+    if (hug >= 1) score += 18;
+    // Ticks: they fold while ~7?18 cells are still open. Do not commute to the far wall.
+    if (facingDir && hug === 0 && (span >= 4 || run >= 4)) score -= 60;
+    if (!facingDir && hug >= 1) score += 20;
+    if (isFood(sim, next)) score += 90;
+    if (dir === hunt) score += fill < 0.35 ? 16 : 4;
+    if (isHoriz(dir) && fill > 0.3) score += 5;
+    if (facingDir && run >= 8) {
+      const foldHugs = opts.some((other) => {
+        if (other === facing || other === OPPOSITE[facing]) return false;
+        return bodyTouches(sim, cellAt(head, other), head) >= 1;
+      });
+      if (foldHugs) score -= 32;
+    }
+    if (!best || score > best.score) best = { dir, score };
   }
-  slabMode = "slab";
-  slabRowsLeft = fillRatio(sim) < 0.12 ? 4 : 8;
-  slabInto = null;
+  return best?.dir ?? null;
 }
 
 function pickDir(state: GameState): Direction {
@@ -415,43 +346,23 @@ function pickDir(state: GameState): Direction {
   const opts = legalDirs(sim);
   if (opts.length === 0) return sim.direc;
 
-  noteGrowth(sim);
-
   for (const dir of safeDirs(sim)) {
     if (isFood(sim, cellAt(headOf(sim), dir))) return dir;
   }
 
   const fill = fillRatio(sim);
-  if (fill >= 0.3) slabMode = "slab";
-
-  if (slabMode === "slab" || fill >= 0.3) {
-    const stroke = strokeDir(sim);
-    if (stroke) return stroke;
-    const pack = packFallback(sim);
-    if (pack) {
-      if (slabRowsLeft > 0 && pack === slabInto) {
-        slabRowsLeft -= 1;
-        if (slabRowsLeft <= 0 && fill < 0.3) {
-          slabMode = "hunt";
-          slabInto = null;
-        }
-      }
-      return pack;
-    }
-  }
-
-  if (fill < 0.3) {
+  if (fill < 0.12 || (!onBodyFace(sim) && fill < 0.45)) {
     const hunt = anySafeHunt(sim);
-    if (hunt) {
-      slabInto = null;
-      return hunt;
-    }
+    if (hunt) return hunt;
   }
 
-  const stroke = strokeDir(sim);
-  if (stroke) return stroke;
-  const pack = packFallback(sim);
+  const pack = packDir(sim);
   if (pack) return pack;
+
+  if (fill < 0.35) {
+    const hunt = anySafeHunt(sim);
+    if (hunt) return hunt;
+  }
 
   const safe = safeDirs(sim);
   if (safe.length > 0) {
