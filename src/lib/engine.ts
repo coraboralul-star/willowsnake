@@ -61,15 +61,16 @@ export const OPPOSITE: Record<Direction, Direction> = {
   right: "left",
 };
 
-export const BASE_TICK = 104;
-export const MIN_TICK = 55;
-export const NITRO_TICK = 55;
-export const SLOW_TICK = 180;
+export const CELLS_PER_SEC = 15;
+export const BASE_TICK = Math.round(1000 / CELLS_PER_SEC);
+export const MIN_TICK = 50;
+export const NITRO_TICK = 50;
+export const SLOW_TICK = 140;
 export const HIJACK_MS = 14400;
 export const RANDOM_FOOD_AT = 220;
-const FOOD_AHEAD_MIN = 12;
-const FOOD_AHEAD_MAX = 38;
-const FOOD_AHEAD_GAP = 8;
+const FOOD_AHEAD_MIN = CELLS_PER_SEC;
+const FOOD_AHEAD_MAX = CELLS_PER_SEC * 4;
+const FOOD_AHEAD_GAP = 10;
 
 export function foodTarget(cols: number, rows: number, snakeLen = 0) {
   const room = Math.max(0, cols * rows - snakeLen);

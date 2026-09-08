@@ -978,6 +978,52 @@ function stepsHorizontal(w: number, h: number): Point[] | null {
   );
 }
 
+function combFoldsRight(w: number, h: number): Point[] | null {
+  if (w < 6 || h < 4 || w % 2 !== 0 || h % 2 !== 0) return null;
+  const pts: Point[] = [];
+  for (let y = 0; y < h; y += 1) {
+    if (y % 2 === 0) pts.push({ x: 1, y }, { x: 0, y });
+    else pts.push({ x: 0, y }, { x: 1, y });
+  }
+  for (let y0 = h - 2; y0 >= 0; y0 -= 2) {
+    const yBot = y0 + 1;
+    const yTop = y0;
+    for (let x = 2; x < w; x += 1) pts.push({ x, y: yBot });
+    for (let x = w - 1; x >= 2; x -= 1) pts.push({ x, y: yTop });
+  }
+  return isBoardCycle(pts, w, h) ? pts : null;
+}
+
+function flipX(order: Point[], w: number): Point[] {
+  return order.map((p) => ({ x: w - 1 - p.x, y: p.y }));
+}
+
+function flipY(order: Point[], h: number): Point[] {
+  return order.map((p) => ({ x: p.x, y: h - 1 - p.y }));
+}
+
+function swapXY(order: Point[]): Point[] {
+  return order.map((p) => ({ x: p.y, y: p.x }));
+}
+
+function combCycle(w: number, h: number, kind: "left" | "right" | "top" | "bottom"): Point[] | null {
+  if (kind === "right") return combFoldsRight(w, h);
+  if (kind === "left") {
+    const raw = combFoldsRight(w, h);
+    return raw && isBoardCycle(raw, w, h) ? flipX(raw, w) : null;
+  }
+  if (kind === "top") {
+    const raw = combFoldsRight(h, w);
+    const swapped = raw ? swapXY(raw) : null;
+    return swapped && isBoardCycle(swapped, w, h) ? swapped : null;
+  }
+  const raw = combFoldsRight(h, w);
+  const swapped = raw ? swapXY(raw) : null;
+  if (!swapped || !isBoardCycle(swapped, w, h)) return null;
+  const flipped = flipY(swapped, h);
+  return isBoardCycle(flipped, w, h) ? flipped : null;
+}
+
 function basementSnail(w: number, h: number, gap: number): Point[] | null {
   if (gap < 2 || h - gap < 8 || h % 2 !== 0 || gap % 2 !== 0) return null;
   const top = coil(w, h - gap);
@@ -1009,10 +1055,16 @@ export function cycleKind() {
 export function generateCycleNext(w: number, h = w): Point[][] {
   lastCycleKind = "none";
   const builders: [string, () => Point[] | null][] = [
+    ["comb", () => combCycle(w, h, "right")],
+    ["comb", () => combCycle(w, h, "left")],
+    ["comb", () => combCycle(w, h, "right")],
+    ["comb", () => combCycle(w, h, "left")],
+    ["comb-h", () => combCycle(w, h, "top")],
+    ["comb-h", () => combCycle(w, h, "bottom")],
+    ["comb-h", () => combCycle(w, h, "top")],
+    ["comb-h", () => combCycle(w, h, "bottom")],
     ["steps", () => stepsVertical(w, h)],
     ["steps", () => stepsVertical(w, h)],
-    ["steps", () => stepsVertical(w, h)],
-    ["steps-h", () => stepsHorizontal(w, h)],
     ["steps-h", () => stepsHorizontal(w, h)],
     ["steps-h", () => stepsHorizontal(w, h)],
     ["twin-mid", () => twinMid(w, h)],
