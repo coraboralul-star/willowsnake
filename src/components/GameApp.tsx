@@ -112,7 +112,7 @@ export function GameApp({ enabled }: GameAppProps) {
           />
         </div>
         <div
-          className={`board-frame relative min-w-0 w-[min(32rem,calc(100%-22.5rem))] transition-transform duration-300 ${
+          className={`board-frame relative min-w-0 w-[min(36rem,calc(100%-22.5rem))] transition-transform duration-300 ${
             ui.hijacked ? "scale-[1.08]" : ""
           } ${ui.status === "over" ? "board-shake" : ""}`}
         >

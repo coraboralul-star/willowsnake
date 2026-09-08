@@ -3,10 +3,8 @@ import { cycleIndex, cyclePrev, generateCycleNext } from "@/lib/hamilton";
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
 export type GameStatus = "idle" | "playing" | "paused" | "over" | "won";
-export const BOARD_COLS = 16;
-export const BOARD_ROWS = 24;
-export const TILE_W = 2;
-export const TILE_H = 2;
+export const BOARD_COLS = 20;
+export const BOARD_ROWS = 20;
 
 export const KEY_TO_DIR: Record<string, Direction> = {
   w: "up",
@@ -100,25 +98,11 @@ function wouldBunch(foods: Point[], cell: Point) {
   return false;
 }
 
-function tileKey(p: Point) {
-  return `${Math.floor(p.x / TILE_W)},${Math.floor(p.y / TILE_H)}`;
-}
-
-function tileEntry(next: Point[][], cols: number, rows: number): Point {
-  let cur = { x: 0, y: 0 };
-  for (let i = 0; i < cols * rows; i += 1) {
-    const nxt = next[cur.y][cur.x];
-    if (tileKey(cur) !== tileKey(nxt)) return nxt;
-    cur = nxt;
-  }
-  return { x: 0, y: 0 };
-}
-
 export function createGame(cols: number, rows = cols): GameState {
   const cycleNext = generateCycleNext(cols, rows);
   const prev = cyclePrev(cycleNext, cols, rows);
   const foods = spawnFoods([], [], cols, rows);
-  const head = tileEntry(cycleNext, cols, rows);
+  const head = { x: 0, y: 0 };
   const neck = prev[head.y][head.x];
   const tail = prev[neck.y][neck.x];
   const snake: Point[] = [head, neck, tail];

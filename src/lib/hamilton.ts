@@ -252,7 +252,7 @@ function mergeCycles(a: Point[], b: Point[], w: number, h: number): Point[] | nu
       winners.push(merged);
     }
   }
-  return winners.length ? pick(winners) : null;
+  return winners.length ? winners[0] : null;
 }
 
 function joinPath(parts: Point[][], w: number, h: number): Point[] | null {
@@ -575,6 +575,145 @@ function pickFill(
   return null;
 }
 
+function reverseBetween(order: Point[], from: number, to: number): Point[] | null {
+  const n = order.length;
+  if (from === to) return null;
+  const inds: number[] = [];
+  let i = from;
+  while (true) {
+    inds.push(i);
+    if (i === to) break;
+    i = nextI(i, n);
+    if (inds.length > n) return null;
+  }
+  if (inds.length < 3 || inds.length > n - 3) return null;
+  const out = order.slice();
+  for (let k = 0; k < inds.length; k += 1) {
+    out[inds[k]] = order[inds[inds.length - 1 - k]];
+  }
+  return out;
+}
+
+function switchQuad(order: Point[], w: number, h: number, a: Point, b: Point): Point[] | null {
+  const idx = indexOf(order, w, h);
+  const n = order.length;
+  const ia = idx[a.y]?.[a.x] ?? -1;
+  const ib = idx[b.y]?.[b.x] ?? -1;
+  if (ia < 0 || ib < 0 || nextI(ia, n) !== ib) return null;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const normals: Point[] = [
+    { x: -dy, y: dx },
+    { x: dy, y: -dx },
+  ];
+  for (const nrm of normals) {
+    const c = { x: a.x + nrm.x, y: a.y + nrm.y };
+    const d = { x: b.x + nrm.x, y: b.y + nrm.y };
+    if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) continue;
+    if (d.x < 0 || d.y < 0 || d.x >= w || d.y >= h) continue;
+    const ic = idx[c.y][c.x];
+    const id = idx[d.y][d.x];
+    if (ic < 0 || id < 0) continue;
+    const cand =
+      nextI(ic, n) === id
+        ? reverseBetween(order, ib, ic)
+        : nextI(id, n) === ic
+          ? reverseBetween(order, ib, id)
+          : null;
+    if (cand && isBoardCycle(cand, w, h)) return cand;
+  }
+  return null;
+}
+
+function addTeeth(order: Point[], w: number, h: number, budget = 16): Point[] {
+  let cur = order;
+  let used = 0;
+  for (let y = 1; y < h - 1; y += 1) {
+    for (let x = 1; x < w - 2; x += 2) {
+      if ((x + 2 * y) % 5 !== 0) continue;
+      const next = switchQuad(cur, w, h, { x, y }, { x: x + 1, y });
+      if (!next) continue;
+      cur = next;
+      used += 1;
+      if (used >= budget) return cur;
+    }
+  }
+  for (let x = 1; x < w - 1; x += 1) {
+    for (let y = 1; y < h - 2; y += 2) {
+      if ((y + 3 * x) % 5 !== 1) continue;
+      const next = switchQuad(cur, w, h, { x, y }, { x, y: y + 1 });
+      if (!next) continue;
+      cur = next;
+      used += 1;
+      if (used >= budget) return cur;
+    }
+  }
+  return cur;
+}
+
+function coilWithZipperCore(w: number, h: number): Point[] | null {
+  if (!canCycle(w, h)) return null;
+  if (w <= 6 && h <= 6) {
+    return tiledSpiral(w, h, 2, 2) ?? coil(w, h);
+  }
+  const outer = rectRing(w, h, 0);
+  const inner = coilWithZipperCore(w - 2, h - 2);
+  if (!inner) return null;
+  const shifted = offset(inner, 1, 1);
+  return (
+    mergeCycles(outer, shifted, w, h) ??
+    mergeCycles(reverseOrder(outer), shifted, w, h) ??
+    mergeCycles(outer, reverseOrder(shifted), w, h)
+  );
+}
+
+function snailShell(w: number, h: number): Point[] | null {
+  const gap = h >= 12 && h % 2 === 0 ? 4 : 0;
+  if (!gap || h - gap < 8) {
+    const all = coilWithZipperCore(w, h);
+    return all && isBoardCycle(all, w, h) ? addTeeth(all, w, h) : all;
+  }
+  const topH = h - gap;
+  const top = coilWithZipperCore(w, topH);
+  const bot = coil(w, gap);
+  if (!top || !bot) return null;
+  const toothed = addTeeth(top, w, topH, 12);
+  const merged =
+    mergeCycles(toothed, offset(bot, 0, topH), w, h) ??
+    mergeCycles(offset(bot, 0, topH), toothed, w, h);
+  return merged && isBoardCycle(merged, w, h) ? merged : null;
+}
+
+function twinSpiral(w: number, h: number): Point[] | null {
+  if (w < 12 || w % 2 !== 0 || h % 2 !== 0) return null;
+  const leftW = Math.floor(w / 2);
+  const rightW = w - leftW;
+  if (leftW < 6 || rightW < 6) return null;
+  const leftRaw = coil(leftW, h);
+  const rightRaw = coil(rightW, h);
+  if (!leftRaw || !rightRaw) return null;
+  const left = addTeeth(leftRaw, leftW, h, 10);
+  const right = addTeeth(rightRaw, rightW, h, 10);
+  return (
+    joinPath([left, offset(right, leftW, 0)], w, h) ??
+    joinPath([left, offset(reverseOrder(right), leftW, 0)], w, h) ??
+    joinPath([reverseOrder(left), offset(right, leftW, 0)], w, h)
+  );
+}
+
+function startTopLeft(order: Point[]): Point[] {
+  const i = order.findIndex((p) => p.x === 0 && p.y === 0);
+  if (i < 0) return order;
+  const rot = order.slice(i).concat(order.slice(0, i));
+  const nxt = rot[1];
+  if (nxt && nxt.x === 0 && nxt.y === 1) return rot;
+  const rev = reverseOrder(rot);
+  const j = rev.findIndex((p) => p.x === 0 && p.y === 0);
+  const rot2 = j < 0 ? rev : rev.slice(j).concat(rev.slice(0, j));
+  if (rot2[1] && rot2[1].x === 0 && rot2[1].y === 1) return rot2;
+  return rot;
+}
+
 let lastCycleKind = "none";
 
 export function cycleKind() {
@@ -583,28 +722,36 @@ export function cycleKind() {
 
 export function generateCycleNext(w: number, h = w): Point[][] {
   lastCycleKind = "none";
-  let order = tiledSpiral(w, h, 2, 2);
-  if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-2x2";
-  if (!order || !isBoardCycle(order, w, h)) {
-    order = tiledSpiral(w, h, 4, 4);
-    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x4";
-  }
-  if (!order || !isBoardCycle(order, w, h)) {
-    order = tiledSpiral(w, h, 4, 6);
-    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-4x6";
-  }
-  if (!order || !isBoardCycle(order, w, h)) {
-    order = tiledSpiral(w, h, 8, 8);
-    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-8x8";
+  const builders: [string, () => Point[] | null][] = [
+    ["snail", () => snailShell(w, h)],
+    ["snail", () => snailShell(w, h)],
+    ["twin", () => twinSpiral(w, h)],
+    ["coil-core", () => coilWithZipperCore(w, h)],
+  ];
+  const start = Math.floor(Math.random() * builders.length);
+  let order: Point[] | null = null;
+  for (let i = 0; i < builders.length; i += 1) {
+    const [name, build] = builders[(start + i) % builders.length];
+    const cand = build();
+    if (cand && isBoardCycle(cand, w, h)) {
+      order = startTopLeft(cand);
+      lastCycleKind = name;
+      break;
+    }
   }
   if (!order || !isBoardCycle(order, w, h)) {
     order = coil(w, h);
     if (order && isBoardCycle(order, w, h)) lastCycleKind = "coil";
   }
   if (!order || !isBoardCycle(order, w, h)) {
+    order = tiledSpiral(w, h, 2, 2);
+    if (order && isBoardCycle(order, w, h)) lastCycleKind = "tile-2x2";
+  }
+  if (!order || !isBoardCycle(order, w, h)) {
     order = serpentine(w, h);
     lastCycleKind = "serpentine";
   }
+  order = startTopLeft(order);
 
   const next = Array.from({ length: h }, () => Array<Point>(w));
   for (let i = 0; i < order.length; i += 1) {

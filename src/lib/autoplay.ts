@@ -32,11 +32,92 @@ function dirBetween(from: Point, to: Point): Direction | null {
   return null;
 }
 
+function manhattan(a: Point, b: Point) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function fwd(from: number, to: number, n: number) {
+  return (to - from + n) % n;
+}
+
+function willGrow(state: GameState, cell: Point) {
+  if (state.pendingGrow > 0) return true;
+  return state.foods.some((food) => food.x === cell.x && food.y === cell.y);
+}
+
+function nearestApple(state: GameState, from: Point) {
+  let best: Point | null = null;
+  let bestDist = Infinity;
+  for (const food of state.foods) {
+    const dist = manhattan(from, food);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = food;
+    }
+  }
+  return best ? { food: best, dist: bestDist } : null;
+}
+
+function maxSkip(fill: number, distTail: number) {
+  if (fill < 0.1) return Math.min(distTail - 1, 72);
+  if (fill < 0.22) return 28;
+  if (fill < 0.4) return 12;
+  return 6;
+}
+
 export function pickAutoplayDir(state: GameState): Direction {
   const facing = state.queued.at(-1) ?? state.direction;
   const head = state.snake[0];
+  const tail = state.snake[state.snake.length - 1];
   const nxt = state.cycleNext[head.y]?.[head.x];
-  return (nxt && dirBetween(head, nxt)) || facing;
+  const cycleDir = (nxt && dirBetween(head, nxt)) || facing;
+  if (!nxt) return facing;
+
+  const apple = nearestApple(state, head);
+  if (!apple) return cycleDir;
+
+  const n = state.cols * state.rows;
+  const headI = state.cycleIndex[head.y]?.[head.x];
+  const tailI = state.cycleIndex[tail.y]?.[tail.x];
+  const appleI = state.cycleIndex[apple.food.y]?.[apple.food.x];
+  if (headI == null || tailI == null || appleI == null || headI < 0 || appleI < 0) {
+    return cycleDir;
+  }
+
+  const distTail = fwd(headI, tailI, n);
+  const distApple = fwd(headI, appleI, n);
+  const fill = state.snake.length / n;
+  const skip = maxSkip(fill, distTail);
+  if (distApple > skip && apple.dist > 3) return cycleDir;
+
+  let best: Direction | null = null;
+  let bestLeft = distApple;
+
+  for (const dir of DIRS) {
+    if (dir === OPPOSITE[state.direction]) continue;
+    const cell = { x: head.x + DELTA[dir].x, y: head.y + DELTA[dir].y };
+    if (cell.x < 0 || cell.y < 0 || cell.x >= state.cols || cell.y >= state.rows) continue;
+    const growing = willGrow(state, cell);
+    const blocked = state.snake.some((part, i) => {
+      if (!growing && i === state.snake.length - 1) return false;
+      return part.x === cell.x && part.y === cell.y;
+    });
+    if (blocked) continue;
+
+    const cellI = state.cycleIndex[cell.y]?.[cell.x];
+    if (cellI == null || cellI < 0) continue;
+    const distNext = fwd(headI, cellI, n);
+    if (distNext === 0 || distNext > skip) continue;
+    if (growing ? distNext >= distTail : distNext > distTail) continue;
+
+    const left = fwd(cellI, appleI, n);
+    if (left < bestLeft) {
+      bestLeft = left;
+      best = dir;
+    }
+  }
+
+  return best ?? cycleDir;
 }
 
 export function applyAutoplayDir(state: GameState, dir: Direction): GameState {
