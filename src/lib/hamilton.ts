@@ -1057,25 +1057,8 @@ export function generateCycleNext(w: number, h = w): Point[][] {
   const builders: [string, () => Point[] | null][] = [
     ["comb", () => combCycle(w, h, "right")],
     ["comb", () => combCycle(w, h, "left")],
-    ["comb", () => combCycle(w, h, "right")],
-    ["comb", () => combCycle(w, h, "left")],
     ["comb-h", () => combCycle(w, h, "top")],
     ["comb-h", () => combCycle(w, h, "bottom")],
-    ["comb-h", () => combCycle(w, h, "top")],
-    ["comb-h", () => combCycle(w, h, "bottom")],
-    ["steps", () => stepsVertical(w, h)],
-    ["steps", () => stepsVertical(w, h)],
-    ["steps-h", () => stepsHorizontal(w, h)],
-    ["steps-h", () => stepsHorizontal(w, h)],
-    ["twin-mid", () => twinMid(w, h)],
-    ["twin-mid", () => twinMid(w, h)],
-    ["quad", () => quadSpiral(w, h)],
-    ["snail-4", () => basementSnail(w, h, 4)],
-    ["snail-6", () => basementSnail(w, h, 6)],
-    ["twin-h", () => twinHorizontal(w, h)],
-    ["half-wave", () => halfSplit(w, h)],
-    ["waves", () => rowWaves(w, h, 0, 0, w, h, 4)],
-    ["coil-core", () => coilWithZipperCore(w, h)],
   ];
   const start = Math.floor(Math.random() * builders.length);
   let order: Point[] | null = null;
