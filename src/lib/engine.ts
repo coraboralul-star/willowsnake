@@ -1,4 +1,4 @@
-import { cycleIndex, generateCycleNext } from "@/lib/hamilton";
+import { cycleIndex, cyclePrev, generateCycleNext } from "@/lib/hamilton";
 
 export type Point = { x: number; y: number };
 export type Direction = "up" | "down" | "left" | "right";
@@ -71,6 +71,13 @@ export function foodTarget(cols: number, rows: number) {
   return 9 + (cols - 12) + Math.floor((rows - cols) / 2);
 }
 
+function dirOf(from: Point, to: Point): Direction {
+  if (to.x === from.x + 1) return "right";
+  if (to.x === from.x - 1) return "left";
+  if (to.y === from.y + 1) return "down";
+  return "up";
+}
+
 function foodKey(p: Point) {
   return `${p.x},${p.y}`;
 }
@@ -93,13 +100,13 @@ function wouldBunch(foods: Point[], cell: Point) {
 
 export function createGame(cols: number, rows = cols): GameState {
   const cycleNext = generateCycleNext(cols, rows);
+  const prev = cyclePrev(cycleNext, cols, rows);
   const foods = spawnFoods([], [], cols, rows);
-  const snake: Point[] = [
-    { x: 0, y: 0 },
-    { x: 0, y: 1 },
-    { x: 0, y: 2 },
-  ];
-  const direction: Direction = "right";
+  const head = { x: 0, y: 0 };
+  const neck = prev[head.y][head.x];
+  const tail = prev[neck.y][neck.x];
+  const snake: Point[] = [head, neck, tail];
+  const direction = dirOf(head, cycleNext[head.y][head.x]);
   const taken = new Set(snake.map(foodKey));
   const kept = foods.filter((food) => !taken.has(foodKey(food)));
 
