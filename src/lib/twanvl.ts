@@ -590,14 +590,19 @@ function phcMove(game: View, cycle: Int32Array, order: Int32Array): Direction | 
   if (game.apple < 0) return followCycle(game, cycle);
   const pos = game.snake[0];
   const tail = tailOf(game);
+  const fill = game.snake.length / game.n;
   const distGoal = cycleDistance(order, game.n, pos, game.apple);
   const distTail = cycleDistance(order, game.n, pos, tail);
   let maxShortcut = Math.min(distGoal, distTail - 3);
-  if (game.snake.length > (game.n * 50) / 100) maxShortcut = 0;
-  if (distGoal < distTail) {
+  if (fill >= 0.48) {
+    maxShortcut = 0;
+  } else if (distGoal < distTail) {
     maxShortcut -= 1;
     if ((distTail - distGoal) * 4 > game.n - game.snake.length) maxShortcut -= 10;
   }
+  const cap = fill < 0.22 ? 8 : fill < 0.35 ? 5 : 3;
+  if (maxShortcut > cap) maxShortcut = cap;
+
   let next = cycle[pos];
   let distNext = 1;
   if (maxShortcut > 0) {
@@ -646,53 +651,18 @@ export function resetTwanvlBrain() {
   brain = null;
 }
 
-function tryCellHunt(game: View, cycle: Int32Array, order: Int32Array) {
-  const foods = game.foods
-    .slice()
-    .sort((a, b) => manhattanI(game.snake[0], a, game.w) - manhattanI(game.snake[0], b, game.w));
-  for (const food of foods) {
-    game.apple = food;
-    const cellDir = cellTreeMove(game);
-    if (cellDir && isLegal(game, cellDir)) {
-      const target = stepI(game.snake[0], cellDir, game.w);
-      if (repairCycle(game, cycle, game.snake[0], target)) fillOrder(cycle, order);
-      return cellDir;
-    }
-  }
-  return null;
-}
-
 export function pickTwanvlDir(state: GameState): Direction {
   const game = toView(state);
   const active = ensureBrain(state);
   active.turn += 1;
   pickApple(game);
 
-  const fill = game.snake.length / game.n;
-  const hunt = fill < 0.26;
-  const mayShortcut = fill < 0.55;
-
-  if (game.apple >= 0 && hunt) {
-    const cellDir = tryCellHunt(game, active.cycle, active.order);
-    if (cellDir) return cellDir;
-  }
-
-  if (game.apple >= 0 && mayShortcut) {
-    const dhcr = dhcrMove(game, active.cycle);
-    fillOrder(active.cycle, active.order);
-    if (dhcr && isLegal(game, dhcr)) return dhcr;
-
+  if (game.apple >= 0) {
     const phc = phcMove(game, active.cycle, active.order);
     if (phc && isLegal(game, phc)) return phc;
   }
 
   const cycleDir = followCycle(game, active.cycle);
   if (cycleDir) return cycleDir;
-
-  if (game.apple >= 0) {
-    const cellDir = tryCellHunt(game, active.cycle, active.order);
-    if (cellDir) return cellDir;
-  }
-
   return anyLegal(game);
 }

@@ -1070,10 +1070,10 @@ export function generateCycleNext(w: number, h = w): Point[][] {
     ["waves", () => rowWaves(w, h, 0, 0, w, h, 4)],
     ["coil-core", () => coilWithZipperCore(w, h)],
   ];
-  const uniformCount = 10;
+  const laneCount = 6;
   const start =
-    Math.random() < 0.88
-      ? Math.floor(Math.random() * uniformCount)
+    Math.random() < 0.92
+      ? Math.floor(Math.random() * laneCount)
       : Math.floor(Math.random() * builders.length);
   let order: Point[] | null = null;
   for (let i = 0; i < builders.length; i += 1) {
