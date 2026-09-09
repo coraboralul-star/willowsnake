@@ -46,7 +46,6 @@ type Brain = {
   order: Int32Array;
   cellPath: number[];
   turn: number;
-  laneVert: boolean;
 };
 
 let brain: Brain | null = null;
@@ -363,6 +362,27 @@ function cellTreeUnreachables(game: View, dists: Int32Array) {
   return { any, nearest, nearestDist };
 }
 
+function appleAlign(game: View, from: number, dir: Direction) {
+  if (game.apple < 0) return 0;
+  const fx = from % game.w;
+  const fy = (from / game.w) | 0;
+  const ax = game.apple % game.w;
+  const ay = (game.apple / game.w) | 0;
+  const onRow = fy === ay;
+  const onCol = fx === ax;
+  const toward =
+    (onRow && ((ax > fx && dir === "right") || (ax < fx && dir === "left"))) ||
+    (onCol && ((ay > fy && dir === "down") || (ay < fy && dir === "up")));
+  const away =
+    (onRow && ((ax > fx && dir === "left") || (ax < fx && dir === "right"))) ||
+    (onCol && ((ay > fy && dir === "up") || (ay < fy && dir === "down")));
+  if (toward) return -260;
+  if (away) return 200;
+  if (onRow && (dir === "up" || dir === "down")) return 180;
+  if (onCol && (dir === "left" || dir === "right")) return 180;
+  return 0;
+}
+
 function cellEdge(
   game: View,
   parents: Int32Array,
@@ -379,13 +399,14 @@ function cellEdge(
   const cb = (((to / game.w) | 0) >> 1) * cw + ((to % game.w) >> 1);
   const toParent = cb === parents[ca];
   const toSame = cb === ca;
-  const continueDir = dir === game.facing ? -70 : 35;
+  const continueDir = dir === game.facing ? -90 : dir === OPPOSITE[game.facing] ? 240 : 40;
   let lane = 0;
-  if (!toSame && brain) {
-    const dcx = (cb % cw) - (ca % cw);
-    const dcy = ((cb / cw) | 0) - ((ca / cw) | 0);
-    if (brain.laneVert) lane = dcy !== 0 && dcx === 0 ? -50 : dcx !== 0 ? 110 : 0;
-    else lane = dcx !== 0 && dcy === 0 ? -50 : dcy !== 0 ? 110 : 0;
+  if (!toSame && game.apple >= 0) {
+    const acx = (game.apple % game.w) >> 1;
+    const acy = ((game.apple / game.w) | 0) >> 1;
+    const distBefore = Math.abs((ca % cw) - acx) + Math.abs(((ca / cw) | 0) - acy);
+    const distAfter = Math.abs((cb % cw) - acx) + Math.abs(((cb / cw) | 0) - acy);
+    lane = distAfter < distBefore ? -80 : distAfter > distBefore ? 120 : 20;
   }
   const right = RIGHT[dir];
   let hug = 0;
@@ -395,9 +416,8 @@ function cellEdge(
   } else {
     hug = -30;
   }
-  // Prefer expanding 2-wide lanes over tight parent-retracing knots.
-  const penalty = toParent ? 120 : toSame ? 25 : lane;
-  return 1000 + penalty + continueDir + hug;
+  const penalty = toParent ? 140 : toSame ? 40 : lane;
+  return 1000 + penalty + continueDir + hug + appleAlign(game, from, dir);
 }
 
 function cellTreeMove(game: View): Direction | null {
@@ -407,7 +427,7 @@ function cellTreeMove(game: View): Direction | null {
   const parents = cellTreeParents(game);
   const edge = (from: number, to: number, dir: Direction) =>
     cellEdge(game, parents, from, to, dir);
-  const steps = astar(game.n, game.w, game.h, edge, pos, game.apple, 1000);
+  const steps = astar(game.n, game.w, game.h, edge, pos, game.apple, 400);
   let path = readPath(steps, pos, game.apple);
   let next = path[path.length - 1] ?? INVALID;
 
@@ -655,7 +675,7 @@ function ensureBrain(state: GameState): Brain {
   const cycle = fromState ?? makeZigZag(w, h);
   const order = new Int32Array(w * h);
   fillOrder(cycle, order);
-  brain = { w, h, cycle, order, cellPath: [], turn: 0, laneVert: Math.random() < 0.5 };
+  brain = { w, h, cycle, order, cellPath: [], turn: 0 };
   return brain;
 }
 
