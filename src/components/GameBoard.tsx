@@ -4,6 +4,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import confetti from "canvas-confetti";
 import {
   BASE_TICK,
+  BOMB_MS,
   spinePath,
   type Direction,
   type Food,
@@ -50,6 +51,10 @@ const COLORS = {
   food: "#E53935",
   foodDark: "#B71C1C",
   foodGlow: "rgba(229, 57, 53, 0.22)",
+  bomb: "#212121",
+  bombLite: "#616161",
+  bombFuse: "#FF6F00",
+  bombGlow: "rgba(255, 111, 0, 0.28)",
 };
 
 export function GameBoard({ liveRef, advance }: GameBoardProps) {
@@ -74,6 +79,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     let width = 0;
     let height = 0;
     let lastAte = 0;
+    let lastBurst = 0;
     let lastTs = performance.now();
     const particles: Particle[] = [];
     const floaters: Floater[] = [];
@@ -128,6 +134,10 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         lastAte = state.ateAt;
         spawnBite(particles, floaters, state.snake[0], cell, canvas, state.score, state.pendingGrow);
       }
+      if (state.bombBurstAt && state.bombBurstAt !== lastBurst) {
+        lastBurst = state.bombBurstAt;
+        spawnBombBursts(particles, state.bombBurst, cell);
+      }
 
       ctx.clearRect(0, 0, width, height);
       if (boardCache.width && boardCache.height) {
@@ -136,6 +146,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         drawBoard(ctx, width, height, cols, rows, cell);
       }
       drawEatFlash(ctx, width, height, now, state.ateAt);
+      drawBombs(ctx, state.bombs, cell, now, state.bombsUntil);
       drawFoods(ctx, state.foods, cell, now);
       stepFx(particles, floaters, dt);
 
@@ -158,6 +169,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       ticker = 0;
       lastTs = performance.now();
       lastAte = liveRef.current.ateAt;
+      lastBurst = liveRef.current.bombBurstAt;
       if (visible) {
         resumeAudio();
         frame = requestAnimationFrame(draw);
@@ -262,6 +274,86 @@ function drawEatFlash(
   ctx.fillStyle = `rgba(255, 248, 231, ${0.28 * t})`;
   roundRect(ctx, 0, 0, width, height, 18);
   ctx.fill();
+}
+
+function drawBombs(
+  ctx: CanvasRenderingContext2D,
+  bombs: Point[],
+  cell: number,
+  now: number,
+  bombsUntil: number,
+) {
+  const remain = bombsUntil > 0 ? Math.max(0, bombsUntil - now) : BOMB_MS;
+  const urgent = remain < 2000;
+  for (const bomb of bombs) {
+    drawBomb(ctx, bomb, cell, now, urgent);
+  }
+}
+
+function drawBomb(
+  ctx: CanvasRenderingContext2D,
+  bomb: Point,
+  cell: number,
+  now: number,
+  urgent: boolean,
+) {
+  const pulse = 0.94 + Math.sin(now / (urgent ? 90 : 220) + bomb.x * 1.3 + bomb.y) * (urgent ? 0.1 : 0.05);
+  const x = bomb.x * cell + cell / 2;
+  const y = bomb.y * cell + cell / 2;
+  const r = cell * 0.28 * pulse;
+
+  ctx.fillStyle = urgent ? "rgba(255, 82, 0, 0.34)" : COLORS.bombGlow;
+  ctx.beginPath();
+  ctx.arc(x, y + cell * 0.04, r * 1.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(42, 51, 36, 0.16)";
+  ctx.beginPath();
+  ctx.ellipse(x, y + cell * 0.22, r * 0.9, r * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = COLORS.bomb;
+  ctx.beginPath();
+  ctx.arc(x, y + cell * 0.02, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = COLORS.bombLite;
+  ctx.beginPath();
+  ctx.arc(x - r * 0.28, y - r * 0.22, r * 0.38, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "#6D4C41";
+  ctx.lineWidth = Math.max(1.4, cell * 0.05);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, y - r * 0.85);
+  ctx.quadraticCurveTo(x + cell * 0.08, y - r * 1.35, x + cell * 0.14, y - r * 1.55);
+  ctx.stroke();
+
+  ctx.fillStyle = urgent ? "#FF3D00" : COLORS.bombFuse;
+  ctx.beginPath();
+  ctx.arc(x + cell * 0.14, y - r * 1.55, cell * (urgent ? 0.07 : 0.05), 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function spawnBombBursts(particles: Particle[], bombs: Point[], cell: number) {
+  for (const bomb of bombs) {
+    const x = bomb.x * cell + cell / 2;
+    const y = bomb.y * cell + cell / 2;
+    for (let i = 0; i < 10; i += 1) {
+      const angle = (Math.PI * 2 * i) / 10 + Math.random() * 0.4;
+      const speed = 0.05 + Math.random() * 0.1;
+      particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed * cell,
+        vy: Math.sin(angle) * speed * cell,
+        life: 0,
+        max: 240 + Math.random() * 180,
+        size: 1.4 + Math.random() * 2.2,
+        color: i % 2 === 0 ? COLORS.bombFuse : COLORS.bomb,
+      });
+    }
+  }
 }
 
 function drawFoods(

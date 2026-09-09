@@ -20,6 +20,10 @@ export const KEY_TO_DIR: Record<string, Direction> = {
 export type FoodKind = "apple" | "golden" | "heart";
 export type Food = Point & { kind: FoodKind; from?: string };
 
+export const START_BOMBS = 15;
+export const START_APPLES = 15;
+export const BOMB_MS = 7000;
+
 export type GameState = {
   cols: number;
   rows: number;
@@ -29,6 +33,10 @@ export type GameState = {
   direction: Direction;
   queued: Direction[];
   foods: Food[];
+  bombs: Point[];
+  bombBurst: Point[];
+  bombBurstAt: number;
+  bombsUntil: number;
   cycleNext: Point[][];
   cycleIndex: number[][];
   score: number;
@@ -104,6 +112,7 @@ export function createGame(cols: number, rows = cols): GameState {
     { x: 1, y },
   ];
   const direction: Direction = "right";
+  const opening = spawnOpening(snake, direction, cols, rows);
 
   return {
     cols,
@@ -113,7 +122,11 @@ export function createGame(cols: number, rows = cols): GameState {
     prevSnake: snake.map((p) => ({ ...p })),
     direction,
     queued: [],
-    foods: spawnFoods(snake, [], cols, rows),
+    foods: opening.foods,
+    bombs: opening.bombs,
+    bombBurst: [],
+    bombBurstAt: 0,
+    bombsUntil: 0,
     cycleNext,
     cycleIndex: cycleIndex(cycleNext, cols, rows),
     score: 0,
@@ -145,7 +158,11 @@ export function enqueueTurn(state: GameState, dir: Direction): GameState {
 }
 
 export function startRun(state: GameState, now: number, dir?: Direction): GameState {
-  let next: GameState = { ...state, status: "playing" };
+  let next: GameState = {
+    ...state,
+    status: "playing",
+    bombsUntil: state.bombs.length > 0 ? now + BOMB_MS : 0,
+  };
   if (dir) next = queueDirection(next, dir);
   next = step(next, now);
   next.tickStartedAt = now;
@@ -158,6 +175,16 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
   const head = state.snake[0];
   const delta = DELTA[direction];
   const nextHead = { x: head.x + delta.x, y: head.y + delta.y };
+  let bombs = state.bombs;
+  let bombBurst = state.bombBurst;
+  let bombBurstAt = state.bombBurstAt;
+  let bombsUntil = state.bombsUntil;
+  if (bombsUntil > 0 && now >= bombsUntil && bombs.length > 0) {
+    bombBurst = bombs;
+    bombBurstAt = now;
+    bombs = [];
+    bombsUntil = 0;
+  }
 
   if (
     nextHead.x < 0 ||
@@ -165,14 +192,45 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     nextHead.x >= state.cols ||
     nextHead.y >= state.rows
   ) {
-    return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
+    return {
+      ...state,
+      bombs,
+      bombBurst,
+      bombBurstAt,
+      bombsUntil,
+      status: "over",
+      prevSnake: clonePoints(state.snake),
+      queued,
+    };
+  }
+
+  if (bombs.some((bomb) => bomb.x === nextHead.x && bomb.y === nextHead.y)) {
+    return {
+      ...state,
+      bombs,
+      bombBurst,
+      bombBurstAt,
+      bombsUntil,
+      status: "over",
+      prevSnake: clonePoints(state.snake),
+      queued,
+    };
   }
 
   const eaten = state.foods.find((food) => food.x === nextHead.x && food.y === nextHead.y);
   const eating = eaten != null;
   const body = eating || state.pendingGrow > 0 ? state.snake : state.snake.slice(0, -1);
   if (body.some((p) => p.x === nextHead.x && p.y === nextHead.y)) {
-    return { ...state, status: "over", prevSnake: clonePoints(state.snake), queued };
+    return {
+      ...state,
+      bombs,
+      bombBurst,
+      bombBurstAt,
+      bombsUntil,
+      status: "over",
+      prevSnake: clonePoints(state.snake),
+      queued,
+    };
   }
 
   const snake = [nextHead, ...state.snake];
@@ -193,6 +251,7 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
         state.foods.filter((food) => food.x !== nextHead.x || food.y !== nextHead.y),
         state.cols,
         state.rows,
+        bombs,
       )
     : state.foods;
 
@@ -207,6 +266,10 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     direction,
     queued,
     foods,
+    bombs,
+    bombBurst,
+    bombBurstAt,
+    bombsUntil,
     score: eating ? state.score + (eaten.kind === "golden" ? 3 : 1) : state.score,
     tickMs,
     pendingGrow,
@@ -307,10 +370,11 @@ export function spawnFoods(
   foods: Food[],
   cols: number,
   rows: number,
+  extraTaken: Point[] = [],
   _along?: CycleHint,
 ): Food[] {
   const target = Math.min(foodTarget(cols, rows, snake.length), cols * rows - snake.length);
-  const taken = new Set([...snake, ...foods].map(foodKey));
+  const taken = new Set([...snake, ...foods, ...extraTaken].map(foodKey));
   const result: Food[] = foods.map((food) => ({ ...food }));
   const inOpen = snake.length < RANDOM_FOOD_AT;
 
@@ -341,7 +405,7 @@ type GiftDrop = {
 };
 
 function emptyCells(state: GameState) {
-  const taken = new Set([...state.snake, ...state.foods].map(foodKey));
+  const taken = new Set([...state.snake, ...state.foods, ...state.bombs].map(foodKey));
   const empty: Point[] = [];
   for (let y = 0; y < state.rows; y += 1) {
     for (let x = 0; x < state.cols; x += 1) {
@@ -359,6 +423,44 @@ function takeCells(state: GameState, count: number) {
     picks.push(pool.splice(idx, 1)[0]);
   }
   return picks;
+}
+
+function spawnOpening(
+  snake: Point[],
+  direction: Direction,
+  cols: number,
+  rows: number,
+) {
+  const taken = new Set(snake.map(foodKey));
+  const ahead = snake[0];
+  for (let i = 1; i <= 2; i += 1) {
+    const x = ahead.x + DELTA[direction].x * i;
+    const y = ahead.y + DELTA[direction].y * i;
+    if (x >= 0 && y >= 0 && x < cols && y < rows) taken.add(foodKey({ x, y }));
+  }
+  const pick = (): Point | null => {
+    const empty: Point[] = [];
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        if (!taken.has(`${x},${y}`)) empty.push({ x, y });
+      }
+    }
+    if (empty.length === 0) return null;
+    const cell = empty[Math.floor(Math.random() * empty.length)];
+    taken.add(foodKey(cell));
+    return cell;
+  };
+  const bombs: Point[] = [];
+  const foods: Food[] = [];
+  for (let i = 0; i < START_BOMBS; i += 1) {
+    const cell = pick();
+    if (cell) bombs.push(cell);
+  }
+  for (let i = 0; i < START_APPLES; i += 1) {
+    const cell = pick();
+    if (cell) foods.push({ ...cell, kind: "apple" });
+  }
+  return { bombs, foods };
 }
 
 export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: string): GameState {

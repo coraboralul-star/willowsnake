@@ -395,6 +395,7 @@ function openAhead(state: GameState, dir: Direction) {
   while (x >= 0 && y >= 0 && x < state.cols && y < state.rows) {
     const atTail = x === tail.x && y === tail.y;
     if (taken.has(`${x},${y}`) && (!atTail || state.pendingGrow > 0)) break;
+    if (state.bombs.some((bomb) => bomb.x === x && bomb.y === y)) break;
     n += 1;
     x += delta.x;
     y += delta.y;

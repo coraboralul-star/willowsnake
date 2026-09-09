@@ -117,6 +117,7 @@ function toView(state: GameState, apple?: number): View {
   const occ = new Uint8Array(n);
   for (const cell of snake) occ[cell] = 1;
   const foods = state.foods.map((food) => idx(food.x, food.y, w));
+  for (const bomb of state.bombs) occ[idx(bomb.x, bomb.y, w)] = 1;
   return {
     w,
     h,
@@ -754,6 +755,21 @@ function tryCellHunt(game: View, cycle: Int32Array, order: Int32Array) {
   return null;
 }
 
+function takeBombIfTrapped(state: GameState, game: View): Direction | null {
+  if (state.bombs.length === 0) return null;
+  if (DIRS.some((dir) => isLegal(game, dir))) return null;
+  const bombAt = new Set(state.bombs.map((bomb) => idx(bomb.x, bomb.y, game.w)));
+  for (const dir of DIRS) {
+    if (dir === OPPOSITE[game.facing]) continue;
+    if (!inBounds(game.snake[0], dir, game.w, game.h)) continue;
+    const cell = stepI(game.snake[0], dir, game.w);
+    if (!bombAt.has(cell)) continue;
+    if (game.snake.includes(cell) && cell !== tailOf(game)) continue;
+    return dir;
+  }
+  return null;
+}
+
 export function pickTwanvlDir(state: GameState): Direction {
   const game = toView(state);
   const active = ensureBrain(state);
@@ -774,5 +790,5 @@ export function pickTwanvlDir(state: GameState): Direction {
 
   const cycleDir = followCycle(game, active.cycle);
   if (cycleDir) return cycleDir;
-  return anyLegal(game);
+  return takeBombIfTrapped(state, game) ?? anyLegal(game);
 }

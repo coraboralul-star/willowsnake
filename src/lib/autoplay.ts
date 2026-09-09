@@ -44,6 +44,7 @@ function isDeadly(state: GameState, dir: Direction) {
   const head = state.snake[0];
   const next = { x: head.x + DELTA[dir].x, y: head.y + DELTA[dir].y };
   if (next.x < 0 || next.y < 0 || next.x >= state.cols || next.y >= state.rows) return true;
+  if (state.bombs.some((bomb) => bomb.x === next.x && bomb.y === next.y)) return true;
   return state.snake.some((part) => part.x === next.x && part.y === next.y);
 }
 
