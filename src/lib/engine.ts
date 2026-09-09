@@ -72,8 +72,7 @@ export const RANDOM_FOOD_AT = 220;
 export function foodTarget(cols: number, rows: number, snakeLen = 0) {
   const room = Math.max(0, cols * rows - snakeLen);
   if (room === 0) return 0;
-  const want = snakeLen >= RANDOM_FOOD_AT ? 2 : Math.random() < 0.4 ? 1 : 2;
-  return Math.min(want, room);
+  return Math.min(1, room);
 }
 
 function foodKey(p: Point) {
