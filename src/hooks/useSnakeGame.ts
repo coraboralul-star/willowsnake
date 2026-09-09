@@ -12,17 +12,21 @@ import {
 } from "@/lib/autoplay";
 import {
   applyGift,
+  cloneGame,
   createGame,
   DELTA,
   enqueueTurn,
   KEY_TO_DIR,
+  rewindGame,
   startRun,
   step,
   type Direction,
+  type GameSnap,
   type GameState,
   type GameStatus,
 } from "@/lib/engine";
-import { onLiveGift, pushLiveAlert, resolveGift } from "@/lib/gifts";
+import { onLiveGift, onLiveLike, pushLiveAlert, resolveGift } from "@/lib/gifts";
+import { recordMatchGift, recordMatchLike, resetMatchFeed } from "@/lib/matchFeed";
 import { createKeyActor } from "@/lib/keyActor";
 import {
   playKeyDown,
@@ -33,6 +37,7 @@ import {
 } from "@/lib/keyboardSounds";
 import { bumpAttempt, bumpDeath, bumpWin } from "@/lib/sessionStats";
 import { playBonk, playEat, resumeAudio } from "@/lib/sfx";
+import { resetTwanvlBrain } from "@/lib/twanvl";
 
 export type GameUi = {
   score: number;
@@ -77,6 +82,8 @@ export function useSnakeGame(
   });
   const retryRef = useRef<number | null>(null);
   const keysRef = useRef<ReturnType<typeof createKeyActor> | null>(null);
+  const historyRef = useRef<GameSnap[]>([]);
+  const spawnRef = useRef<GameState | null>(null);
   const [ui, setUi] = useState<GameUi>(() => ({
     score: 3,
     status: "idle",
@@ -122,6 +129,9 @@ export function useSnakeGame(
     liveRef.current = createGame(cols, rows);
     comboRef.current.pristine = false;
     comboRef.current.eligible = false;
+    resetMatchFeed();
+    historyRef.current = [];
+    spawnRef.current = null;
     publish();
   }, [cols, rows, publish]);
 
@@ -131,12 +141,16 @@ export function useSnakeGame(
       retryRef.current = null;
     }
     applyComboToggle();
+    resetMatchFeed();
     let game = createGame(cols, rows);
     if (isAutoplay()) {
       autoplayOnNewRun(game.tickMs);
       game = applyAutoplayDir(game, pickAutoplayDir(game));
     }
-    liveRef.current = startRun(game, performance.now());
+    const now = performance.now();
+    liveRef.current = startRun(game, now);
+    spawnRef.current = cloneGame(liveRef.current);
+    historyRef.current = [{ at: now, state: spawnRef.current }];
     keysRef.current?.reset();
     beginRun();
     publish();
@@ -145,9 +159,9 @@ export function useSnakeGame(
   const startRef = useRef(start);
   startRef.current = start;
 
-  const queueAutoRetry = useCallback(() => {
+  const queueAutoRetry = useCallback((won = false) => {
     if (!isAutoplay() || retryRef.current != null) return;
-    const wait = 900 + Math.random() * 6100;
+    const wait = won ? 7000 + Math.pow(Math.random(), 2.4) * 5000 : 900 + Math.random() * 6100;
     retryRef.current = window.setTimeout(() => {
       retryRef.current = null;
       startRef.current();
@@ -242,6 +256,11 @@ export function useSnakeGame(
       }
       liveRef.current = next;
       advanced = true;
+      if (next.status === "playing") {
+        historyRef.current.push({ at: now, state: cloneGame(next) });
+        const keep = now - 30000;
+        historyRef.current = historyRef.current.filter((snap, index) => index === 0 || snap.at >= keep);
+      }
 
       if (!burst && next.score > current.score) playEat();
 
@@ -255,7 +274,7 @@ export function useSnakeGame(
           !isAutoplay() && next.status === "over" && comboRef.current.pristine;
         setUi(toUi(next));
         onEndRef.current?.(next.snake.length);
-        if (isAutoplay()) queueAutoRetry();
+        if (isAutoplay()) queueAutoRetry(next.status === "won");
         return;
       }
     }
@@ -286,7 +305,22 @@ export function useSnakeGame(
   useEffect(() => {
     return onLiveGift((gift) => {
       const action = resolveGift(gift);
-      liveRef.current = applyGift(liveRef.current, action, performance.now(), gift.user);
+      const coins = Math.max(0, gift.coins) * Math.max(1, gift.count ?? 1);
+      recordMatchGift(gift.user, coins, gift.avatar, gift.uniqueId || gift.user);
+      const now = performance.now();
+      if (action.rewind) {
+        liveRef.current = rewindGame(
+          historyRef.current,
+          spawnRef.current ?? liveRef.current,
+          now,
+        );
+        resetTwanvlBrain();
+        if (isAutoplay()) {
+          liveRef.current = applyAutoplayDir(liveRef.current, pickAutoplayDir(liveRef.current));
+        }
+      } else {
+        liveRef.current = applyGift(liveRef.current, action, now, gift.user);
+      }
       if (action.takeover) {
         keysRef.current?.reset();
         setHeldKey(null);
@@ -300,6 +334,12 @@ export function useSnakeGame(
       publish();
     });
   }, [publish]);
+
+  useEffect(() => {
+    return onLiveLike((like) => {
+      recordMatchLike(like.user, like.likes, like.avatar, like.uniqueId || like.user);
+    });
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;

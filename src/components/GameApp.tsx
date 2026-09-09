@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { RotateCcw } from "lucide-react";
 import { GameBoard } from "@/components/GameBoard";
+import { MatchRecap } from "@/components/MatchRecap";
 import { GiftTestBar } from "@/components/GiftTestBar";
 import { GiftToasts } from "@/components/GiftToasts";
 import { KeyPad, SIDE_RAIL_CLASS, SideRailSlot } from "@/components/KeyPad";
@@ -141,6 +142,7 @@ export function GameApp({ enabled }: GameAppProps) {
                 {ui.status !== "paused" && (
                   <p className="mt-3 font-display text-2xl text-sage-deep">{ui.score}</p>
                 )}
+                {ui.status === "won" && <MatchRecap />}
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   {ui.status === "paused" ? (
                     <button type="button" className="btn-primary" onClick={togglePause}>
@@ -173,7 +175,7 @@ export function GameApp({ enabled }: GameAppProps) {
 function Overlay({ children }: { children: ReactNode }) {
   return (
     <motion.div
-      className="absolute inset-3 flex flex-col items-center justify-center rounded-[1.1rem] bg-parchment/82 px-6 text-center backdrop-blur-[6px]"
+      className="absolute inset-2 flex flex-col items-center justify-center overflow-hidden rounded-[1.1rem] bg-parchment/88 px-3 py-4 text-center backdrop-blur-[6px] sm:inset-3 sm:px-6"
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}

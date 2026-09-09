@@ -5,18 +5,32 @@ export type LiveGift = {
   user: string;
   coins: number;
   count?: number;
+  avatar?: string;
+  uniqueId?: string;
 };
 
-export type GiftTone = "rose" | "rain" | "nitro" | "golden" | "takeover";
+export type LiveLike = {
+  id: string;
+  user: string;
+  likes: number;
+  avatar?: string;
+  uniqueId?: string;
+};
+
+export type GiftTone = "rose" | "rain" | "bomb" | "flood" | "rewind";
 
 export type GiftAction = {
   apples: number;
+  bombs: number;
   golden: number;
   hearts: number;
+  appleFlood: boolean;
+  bombFlood: boolean;
   nitroMs: number;
   slowMs: number;
   glowMs: number;
   takeover: boolean;
+  rewind: boolean;
   confetti: boolean;
   label: string;
   tone: GiftTone;
@@ -31,17 +45,19 @@ export type LiveAlert = {
 
 export const TEST_DROPS: { coins: number; count: number; label: string }[] = [
   { coins: 1, count: 1, label: "1" },
-  { coins: 1, count: 10, label: "10×1" },
   { coins: 10, count: 1, label: "10" },
-  { coins: 50, count: 1, label: "50" },
+  { coins: 15, count: 1, label: "15" },
   { coins: 100, count: 1, label: "100" },
-  { coins: 999, count: 1, label: "999+" },
+  { coins: 149, count: 1, label: "149" },
+  { coins: 200, count: 1, label: "200" },
 ];
 
 type GiftHandler = (gift: LiveGift) => void;
+type LikeHandler = (like: LiveLike) => void;
 type AlertHandler = (alert: LiveAlert) => void;
 
 const giftHandlers = new Set<GiftHandler>();
+const likeHandlers = new Set<LikeHandler>();
 const alertHandlers = new Set<AlertHandler>();
 
 export function onLiveGift(handler: GiftHandler) {
@@ -53,6 +69,17 @@ export function onLiveGift(handler: GiftHandler) {
 
 export function emitLiveGift(gift: LiveGift) {
   for (const handler of giftHandlers) handler(gift);
+}
+
+export function onLiveLike(handler: LikeHandler) {
+  likeHandlers.add(handler);
+  return () => {
+    likeHandlers.delete(handler);
+  };
+}
+
+export function emitLiveLike(like: LiveLike) {
+  for (const handler of likeHandlers) handler(like);
 }
 
 export function onLiveAlert(handler: AlertHandler) {
@@ -80,15 +107,27 @@ export function testCoins(coins: number, count = 1, user = "Test gifter") {
   });
 }
 
+export function testLikes(likes = 12, user = "Test liker") {
+  emitLiveLike({
+    id: `like-${user}-${Date.now()}`,
+    user,
+    likes,
+  });
+}
+
 function snack(label: string, tone: GiftTone, extra: Partial<GiftAction> = {}): GiftAction {
   return {
     apples: 0,
+    bombs: 0,
     golden: 0,
     hearts: 0,
+    appleFlood: false,
+    bombFlood: false,
     nitroMs: 0,
     slowMs: 0,
     glowMs: 0,
     takeover: false,
+    rewind: false,
     confetti: false,
     label,
     tone,
@@ -105,35 +144,25 @@ function coinLabel(coins: number, count: number) {
 export function resolveGift(gift: LiveGift): GiftAction {
   const unit = Math.max(0, Math.floor(gift.coins));
   const count = Math.max(1, Math.floor(gift.count ?? 1));
-  const label = unit >= 999 ? "Take over" : coinLabel(unit, count);
+  const label = coinLabel(unit, count);
 
-  if (unit >= 999) {
-    return snack(label, "takeover", { takeover: true });
+  if (unit === 1) {
+    return snack(label, "rose", { apples: count, glowMs: 1800 });
   }
-  if (unit >= 100) {
-    return snack(label, "golden", {
-      golden: count,
-      glowMs: 7000,
-      confetti: true,
-    });
+  if (unit === 10) {
+    return snack(label, "rain", { apples: 15 * count, glowMs: 2500, confetti: true });
   }
-  if (unit >= 50) {
-    return snack(label, "nitro", {
-      apples: count,
-      nitroMs: 8000,
-      glowMs: 8000,
-    });
+  if (unit === 15) {
+    return snack(label, "bomb", { bombs: 5 * count, glowMs: 2500 });
   }
-  if (unit >= 10) {
-    const rain = Math.min(12, Math.max(5, Math.floor(unit / 2)));
-    return snack(label, "rain", {
-      apples: rain * count,
-      glowMs: 2500,
-      confetti: true,
-    });
+  if (unit === 100) {
+    return snack(label, "flood", { appleFlood: true, glowMs: 4000, confetti: true });
   }
-  return snack(label, "rose", {
-    apples: count,
-    glowMs: 1800,
-  });
+  if (unit === 149) {
+    return snack(label, "bomb", { bombFlood: true, glowMs: 4000 });
+  }
+  if (unit === 200) {
+    return snack(label, "rewind", { rewind: true, glowMs: 1800 });
+  }
+  return snack(label, "rose");
 }

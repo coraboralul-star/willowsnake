@@ -22,7 +22,10 @@ export type Food = Point & { kind: FoodKind; from?: string };
 
 export const START_BOMBS = 15;
 export const START_APPLES = 15;
-export const BOMB_MS = 7000;
+export const BOMB_MS = 10000;
+export const REWIND_MS = 30000;
+
+export type Bomb = Point & { from?: string; until: number };
 
 export type GameState = {
   cols: number;
@@ -33,10 +36,11 @@ export type GameState = {
   direction: Direction;
   queued: Direction[];
   foods: Food[];
-  bombs: Point[];
+  bombs: Bomb[];
   bombBurst: Point[];
   bombBurstAt: number;
-  bombsUntil: number;
+  appleFlood: boolean;
+  bombFlood: boolean;
   cycleNext: Point[][];
   cycleIndex: number[][];
   score: number;
@@ -126,7 +130,8 @@ export function createGame(cols: number, rows = cols): GameState {
     bombs: opening.bombs,
     bombBurst: [],
     bombBurstAt: 0,
-    bombsUntil: 0,
+    appleFlood: false,
+    bombFlood: false,
     cycleNext,
     cycleIndex: cycleIndex(cycleNext, cols, rows),
     score: 0,
@@ -161,7 +166,10 @@ export function startRun(state: GameState, now: number, dir?: Direction): GameSt
   let next: GameState = {
     ...state,
     status: "playing",
-    bombsUntil: state.bombs.length > 0 ? now + BOMB_MS : 0,
+    bombs: state.bombs.map((bomb) => ({
+      ...bomb,
+      until: bomb.until > 0 ? bomb.until : now + BOMB_MS,
+    })),
   };
   if (dir) next = queueDirection(next, dir);
   next = step(next, now);
@@ -178,12 +186,11 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
   let bombs = state.bombs;
   let bombBurst = state.bombBurst;
   let bombBurstAt = state.bombBurstAt;
-  let bombsUntil = state.bombsUntil;
-  if (bombsUntil > 0 && now >= bombsUntil && bombs.length > 0) {
-    bombBurst = bombs;
+  const expired = bombs.filter((bomb) => bomb.until > 0 && now >= bomb.until);
+  if (expired.length > 0) {
+    bombBurst = expired;
     bombBurstAt = now;
-    bombs = [];
-    bombsUntil = 0;
+    bombs = bombs.filter((bomb) => bomb.until <= 0 || now < bomb.until);
   }
 
   if (
@@ -197,7 +204,6 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
       bombs,
       bombBurst,
       bombBurstAt,
-      bombsUntil,
       status: "over",
       prevSnake: clonePoints(state.snake),
       queued,
@@ -210,7 +216,6 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
       bombs,
       bombBurst,
       bombBurstAt,
-      bombsUntil,
       status: "over",
       prevSnake: clonePoints(state.snake),
       queued,
@@ -226,7 +231,6 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
       bombs,
       bombBurst,
       bombBurstAt,
-      bombsUntil,
       status: "over",
       prevSnake: clonePoints(state.snake),
       queued,
@@ -245,7 +249,7 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
   }
 
   const filled = snake.length >= state.cols * state.rows;
-  const foods = eating
+  let foods = eating
     ? spawnFoods(
         snake,
         state.foods.filter((food) => food.x !== nextHead.x || food.y !== nextHead.y),
@@ -253,7 +257,12 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
         state.rows,
         bombs,
       )
-    : state.foods;
+    : state.foods.slice();
+  if (!filled && (state.appleFlood || state.bombFlood)) {
+    const flooded = applyFloods({ ...state, snake, foods, bombs }, now);
+    foods = flooded.foods;
+    bombs = flooded.bombs;
+  }
 
   const nitroUntil = state.nitroUntil && now >= state.nitroUntil ? 0 : state.nitroUntil;
   const slowUntil = state.slowUntil && now >= state.slowUntil ? 0 : state.slowUntil;
@@ -269,7 +278,6 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
     bombs,
     bombBurst,
     bombBurstAt,
-    bombsUntil,
     score: eating ? state.score + (eaten.kind === "golden" ? 3 : 1) : state.score,
     tickMs,
     pendingGrow,
@@ -394,15 +402,67 @@ export function spawnFood(snake: Point[], cols: number, rows = cols): Food {
   return spawnFoods(snake, [], cols, rows)[0] ?? { ...snake[0], kind: "apple" };
 }
 
-type GiftDrop = {
+export type GiftDrop = {
   apples: number;
+  bombs: number;
   golden: number;
   hearts: number;
+  appleFlood: boolean;
+  bombFlood: boolean;
   nitroMs: number;
   slowMs: number;
   glowMs: number;
   takeover: boolean;
+  rewind: boolean;
 };
+
+function applyFloods(state: GameState, now: number) {
+  let foods = state.foods.map((food) => ({ ...food }));
+  let bombs = state.bombs.map((bomb) => ({ ...bomb }));
+  if (state.appleFlood) {
+    const cells = emptyCells({ ...state, foods, bombs });
+    foods = [
+      ...foods,
+      ...cells.map((cell) => ({ ...cell, kind: "apple" as const, from: "gift" })),
+    ];
+  }
+  if (state.bombFlood) {
+    const cells = emptyCells({ ...state, foods, bombs });
+    bombs = [
+      ...bombs,
+      ...cells.map((cell) => ({ ...cell, from: "gift", until: now + BOMB_MS })),
+    ];
+  }
+  return { foods, bombs };
+}
+
+export function cloneGame(state: GameState): GameState {
+  return {
+    ...state,
+    snake: clonePoints(state.snake),
+    prevSnake: clonePoints(state.prevSnake),
+    queued: [...state.queued],
+    foods: state.foods.map((food) => ({ ...food })),
+    bombs: state.bombs.map((bomb) => ({ ...bomb })),
+    bombBurst: clonePoints(state.bombBurst),
+  };
+}
+
+export type GameSnap = { at: number; state: GameState };
+
+export function rewindGame(history: GameSnap[], spawn: GameState, now: number): GameState {
+  const target = now - REWIND_MS;
+  let picked = spawn;
+  for (const snap of history) {
+    if (snap.at <= target) picked = snap.state;
+    else break;
+  }
+  const restored = cloneGame(picked);
+  restored.status = "playing";
+  restored.queued = [];
+  restored.tickStartedAt = now;
+  return restored;
+}
 
 function emptyCells(state: GameState) {
   const taken = new Set([...state.snake, ...state.foods, ...state.bombs].map(foodKey));
@@ -450,11 +510,11 @@ function spawnOpening(
     taken.add(foodKey(cell));
     return cell;
   };
-  const bombs: Point[] = [];
+  const bombs: Bomb[] = [];
   const foods: Food[] = [];
   for (let i = 0; i < START_BOMBS; i += 1) {
     const cell = pick();
-    if (cell) bombs.push(cell);
+    if (cell) bombs.push({ ...cell, until: 0 });
   }
   for (let i = 0; i < START_APPLES; i += 1) {
     const cell = pick();
@@ -481,6 +541,22 @@ export function applyGift(state: GameState, drop: GiftDrop, now: number, from?: 
   add("apple", drop.apples);
   add("golden", drop.golden);
   add("heart", drop.hearts);
+  if (drop.bombs > 0) {
+    const cells = takeCells(next, drop.bombs);
+    next = {
+      ...next,
+      bombs: [
+        ...next.bombs,
+        ...cells.map((cell) => ({ ...cell, from, until: now + BOMB_MS })),
+      ],
+    };
+  }
+  if (drop.appleFlood) next = { ...next, appleFlood: true };
+  if (drop.bombFlood) next = { ...next, bombFlood: true };
+  if (drop.appleFlood || drop.bombFlood) {
+    const flooded = applyFloods(next, now);
+    next = { ...next, foods: flooded.foods, bombs: flooded.bombs };
+  }
   if (drop.nitroMs > 0) {
     next = {
       ...next,

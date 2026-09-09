@@ -1,7 +1,7 @@
 "use client";
 
-import { Gift } from "lucide-react";
-import { TEST_DROPS, testCoins } from "@/lib/gifts";
+import { Gift, Heart } from "lucide-react";
+import { TEST_DROPS, testCoins, testLikes } from "@/lib/gifts";
 
 export function GiftTestBar() {
   return (
@@ -20,6 +20,14 @@ export function GiftTestBar() {
           {drop.label}
         </button>
       ))}
+      <button
+        type="button"
+        className="btn-primary !py-1.5 !text-[0.65rem]"
+        onClick={() => testLikes(8 + Math.floor(Math.random() * 20))}
+      >
+        <Heart className="h-3.5 w-3.5" />
+        like
+      </button>
     </div>
   );
 }

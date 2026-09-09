@@ -6,6 +6,7 @@ import {
   BASE_TICK,
   BOMB_MS,
   spinePath,
+  type Bomb,
   type Direction,
   type Food,
   type GameState,
@@ -55,6 +56,11 @@ const COLORS = {
   bombLite: "#616161",
   bombFuse: "#FF6F00",
   bombGlow: "rgba(255, 111, 0, 0.28)",
+  giftFood: "#7C4DFF",
+  giftFoodDark: "#4527A0",
+  giftBomb: "#4A148C",
+  giftBombLite: "#CE93D8",
+  giftBombGlow: "rgba(156, 39, 176, 0.32)",
 };
 
 export function GameBoard({ liveRef, advance }: GameBoardProps) {
@@ -146,7 +152,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         drawBoard(ctx, width, height, cols, rows, cell);
       }
       drawEatFlash(ctx, width, height, now, state.ateAt);
-      drawBombs(ctx, state.bombs, cell, now, state.bombsUntil);
+      drawBombs(ctx, state.bombs, cell, now);
       drawFoods(ctx, state.foods, cell, now);
       stepFx(particles, floaters, dt);
 
@@ -184,12 +190,12 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     const stopAlerts = onLiveAlert((alert) => {
       const rect = canvas.getBoundingClientRect();
       const palette =
-        alert.tone === "golden"
-          ? ["#F9A825", "#FFF8E7", "#FFD54F"]
-          : alert.tone === "nitro"
-            ? ["#29B6F6", "#FFF8E7", "#43A047"]
+        alert.tone === "flood" || alert.tone === "rewind"
+          ? ["#7C4DFF", "#FFF8E7", "#CE93D8"]
+          : alert.tone === "bomb"
+            ? ["#4A148C", "#FF6F00", "#FFF8E7"]
             : ["#E53935", "#43A047", "#F9A825", "#FFF8E7"];
-      if (alert.tone !== "takeover") {
+      if (alert.tone !== "rewind") {
         confetti({
           particleCount: alert.tone === "rose" ? 24 : 90,
           spread: 72,
@@ -278,31 +284,30 @@ function drawEatFlash(
 
 function drawBombs(
   ctx: CanvasRenderingContext2D,
-  bombs: Point[],
+  bombs: Bomb[],
   cell: number,
   now: number,
-  bombsUntil: number,
 ) {
-  const remain = bombsUntil > 0 ? Math.max(0, bombsUntil - now) : BOMB_MS;
-  const urgent = remain < 2000;
   for (const bomb of bombs) {
-    drawBomb(ctx, bomb, cell, now, urgent);
+    const remain = bomb.until > 0 ? Math.max(0, bomb.until - now) : BOMB_MS;
+    drawBomb(ctx, bomb, cell, now, remain < 2000);
   }
 }
 
 function drawBomb(
   ctx: CanvasRenderingContext2D,
-  bomb: Point,
+  bomb: Bomb,
   cell: number,
   now: number,
   urgent: boolean,
 ) {
+  const gifted = Boolean(bomb.from);
   const pulse = 0.94 + Math.sin(now / (urgent ? 90 : 220) + bomb.x * 1.3 + bomb.y) * (urgent ? 0.1 : 0.05);
   const x = bomb.x * cell + cell / 2;
   const y = bomb.y * cell + cell / 2;
   const r = cell * 0.28 * pulse;
 
-  ctx.fillStyle = urgent ? "rgba(255, 82, 0, 0.34)" : COLORS.bombGlow;
+  ctx.fillStyle = urgent ? "rgba(255, 82, 0, 0.34)" : gifted ? COLORS.giftBombGlow : COLORS.bombGlow;
   ctx.beginPath();
   ctx.arc(x, y + cell * 0.04, r * 1.35, 0, Math.PI * 2);
   ctx.fill();
@@ -312,11 +317,11 @@ function drawBomb(
   ctx.ellipse(x, y + cell * 0.22, r * 0.9, r * 0.28, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = COLORS.bomb;
+  ctx.fillStyle = gifted ? COLORS.giftBomb : COLORS.bomb;
   ctx.beginPath();
   ctx.arc(x, y + cell * 0.02, r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = COLORS.bombLite;
+  ctx.fillStyle = gifted ? COLORS.giftBombLite : COLORS.bombLite;
   ctx.beginPath();
   ctx.arc(x - r * 0.28, y - r * 0.22, r * 0.38, 0, Math.PI * 2);
   ctx.fill();
@@ -378,12 +383,12 @@ function drawFood(
   const x = food.x * cell + cell / 2;
   const y = food.y * cell + cell / 2;
 
-  ctx.fillStyle = food.kind === "golden" ? "rgba(249, 168, 37, 0.28)" : COLORS.foodGlow;
+  ctx.fillStyle = food.kind === "golden" ? "rgba(249, 168, 37, 0.28)" : food.from ? "rgba(124, 77, 255, 0.28)" : COLORS.foodGlow;
   ctx.beginPath();
   ctx.arc(x, y + cell * 0.04, cell * 0.28 * scale, 0, Math.PI * 2);
   ctx.fill();
   if (food.kind === "heart") drawHeart(ctx, x, y, cell * 0.9 * scale);
-  else drawApple(ctx, x, y, cell * 0.92 * scale, food.kind === "golden");
+  else drawApple(ctx, x, y, cell * 0.92 * scale, food.kind === "golden", Boolean(food.from));
 }
 
 function drawSnake(
@@ -463,7 +468,7 @@ function traceSpine(
   ctx.lineTo(x(last), y(last));
 }
 
-function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, golden = false) {
+function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, golden = false, gifted = false) {
   const s = size / 32;
   ctx.save();
   ctx.translate(x, y);
@@ -472,17 +477,17 @@ function drawApple(ctx: CanvasRenderingContext2D, x: number, y: number, size: nu
   ctx.beginPath();
   ctx.ellipse(0, 14, 10, 3, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = golden ? "#F57F17" : COLORS.foodDark;
+  ctx.fillStyle = golden ? "#F57F17" : gifted ? COLORS.giftFoodDark : COLORS.foodDark;
   ctx.beginPath();
   ctx.arc(-4.5, 2.2, 11, 0, Math.PI * 2);
   ctx.arc(4.5, 2.2, 11, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = golden ? "#FDD835" : COLORS.food;
+  ctx.fillStyle = golden ? "#FDD835" : gifted ? COLORS.giftFood : COLORS.food;
   ctx.beginPath();
   ctx.arc(-4.5, 0.4, 10, 0, Math.PI * 2);
   ctx.arc(4.5, 0.4, 10, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = golden ? "#FFF8E1" : "#FFCDD2";
+  ctx.fillStyle = golden ? "#FFF8E1" : gifted ? "#EDE7F6" : "#FFCDD2";
   ctx.beginPath();
   ctx.ellipse(-6.5, -4, 3.1, 4.2, -0.4, 0, Math.PI * 2);
   ctx.fill();

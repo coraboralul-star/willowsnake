@@ -1,6 +1,6 @@
 "use client";
 
-import { emitLiveGift, type LiveGift } from "@/lib/gifts";
+import { emitLiveGift, emitLiveLike, type LiveGift, type LiveLike } from "@/lib/gifts";
 
 export type TikTokLiveHandle = {
   disconnect: () => void;
@@ -16,12 +16,15 @@ const BRIDGE_HTTP = "http://127.0.0.1:8787";
 const BRIDGE_WS = "ws://127.0.0.1:8787";
 
 type BridgeGift = LiveGift & { type?: string };
+type BridgeLike = LiveLike & { type?: string };
 
 export function connectTikTokLive(options: {
   onGift?: (gift: LiveGift) => void;
+  onLike?: (like: LiveLike) => void;
   onStatus?: (status: TikTokBridgeStatus) => void;
 } = {}): TikTokLiveHandle {
   const onGift = options.onGift ?? emitLiveGift;
+  const onLike = options.onLike ?? emitLiveLike;
   const onStatus = options.onStatus;
   const seen = new Set<string>();
   let closed = false;
@@ -29,16 +32,35 @@ export function connectTikTokLive(options: {
   let retry: number | null = null;
   let poller: number | null = null;
 
+  const remember = (id: string) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    if (seen.size > 400) seen.clear();
+    return true;
+  };
+
   const takeGift = (gift: BridgeGift) => {
     if (!gift.id || !gift.user || !gift.coins) return;
-    if (seen.has(gift.id)) return;
-    seen.add(gift.id);
-    if (seen.size > 200) seen.clear();
+    if (!remember(gift.id)) return;
     onGift({
       id: gift.id,
       user: gift.user,
       coins: gift.coins,
       count: gift.count ?? 1,
+      avatar: gift.avatar,
+      uniqueId: gift.uniqueId,
+    });
+  };
+
+  const takeLike = (like: BridgeLike) => {
+    if (!like.id || !like.user) return;
+    if (!remember(like.id)) return;
+    onLike({
+      id: like.id,
+      user: like.user,
+      likes: Math.max(1, like.likes || 1),
+      avatar: like.avatar,
+      uniqueId: like.uniqueId,
     });
   };
 
@@ -55,7 +77,7 @@ export function connectTikTokLive(options: {
           uniqueId?: string;
           connected?: boolean;
           message?: string;
-        } & BridgeGift;
+        } & BridgeGift & BridgeLike;
         if (payload.type === "status") {
           onStatus?.({
             connected: Boolean(payload.connected),
@@ -65,6 +87,7 @@ export function connectTikTokLive(options: {
           return;
         }
         if (payload.type === "gift") takeGift(payload);
+        if (payload.type === "like") takeLike(payload);
       } catch {
         // Ignore malformed bridge frames.
       }
@@ -92,6 +115,7 @@ export function connectTikTokLive(options: {
         uniqueId?: string;
         message?: string;
         gifts?: BridgeGift[];
+        likes?: BridgeLike[];
       };
       onStatus?.({
         connected: Boolean(data.connected),
@@ -99,6 +123,7 @@ export function connectTikTokLive(options: {
         message: data.message ?? (data.connected ? "Listening" : "Waiting for LIVE"),
       });
       for (const gift of data.gifts ?? []) takeGift(gift);
+      for (const like of data.likes ?? []) takeLike(like);
     } catch {
       // Bridge is down; socket retry will keep trying.
     }

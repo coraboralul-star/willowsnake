@@ -21,11 +21,14 @@ if (!apiKey) {
 
 const sockets = new Set<WebSocket>();
 const recent: Array<{
-  type: "gift";
+  type: "gift" | "like";
   id: string;
   user: string;
-  coins: number;
-  count: number;
+  coins?: number;
+  count?: number;
+  likes?: number;
+  avatar?: string;
+  uniqueId?: string;
 }> = [];
 
 function broadcast(payload: unknown) {
@@ -33,6 +36,30 @@ function broadcast(payload: unknown) {
   for (const socket of sockets) {
     if (socket.readyState === socket.OPEN) socket.send(raw);
   }
+}
+
+function userAvatar(user: Record<string, unknown>) {
+  const pic = (user.profilePicture ?? user.avatarThumb ?? user.profilePictureUrl) as
+    | { url?: string[]; urlList?: string[] }
+    | string
+    | undefined;
+  if (typeof pic === "string" && pic.startsWith("http")) return pic;
+  if (pic && typeof pic === "object") {
+    const list = pic.urlList ?? pic.url;
+    const first = Array.isArray(list) ? list[0] : undefined;
+    if (typeof first === "string" && first.startsWith("http")) return first;
+  }
+  return undefined;
+}
+
+function mapUser(user: Record<string, unknown>) {
+  const uniqueId = String(user.uniqueId || user.unique_id || "");
+  const name = String(user.nickname || uniqueId || "Viewer");
+  return {
+    user: name,
+    uniqueId: uniqueId || undefined,
+    avatar: userAvatar(user),
+  };
 }
 
 function mapGift(data: Record<string, unknown>) {
@@ -46,13 +73,27 @@ function mapGift(data: Record<string, unknown>) {
   const count = Math.max(1, Number(data.repeatCount ?? data.repeat_count ?? 1));
   if (coins <= 0) return null;
 
-  const name = String(user.nickname || user.uniqueId || user.unique_id || "Viewer");
   return {
     type: "gift" as const,
-    id: `${name}-${coins}-${count}-${Date.now()}`,
-    user: name,
+    id: `${mapUser(user).user}-${coins}-${count}-${Date.now()}`,
+    ...mapUser(user),
     coins,
     count,
+  };
+}
+
+function mapLike(data: Record<string, unknown>) {
+  const user = (data.user ?? {}) as Record<string, unknown>;
+  const likes = Math.max(
+    1,
+    Number(data.likeCount ?? data.count ?? data.totalLikeCount ?? 1),
+  );
+  const mapped = mapUser(user);
+  return {
+    type: "like" as const,
+    id: `${mapped.uniqueId || mapped.user}-like-${Date.now()}`,
+    ...mapped,
+    likes,
   };
 }
 
@@ -85,7 +126,8 @@ httpServer.on("request", (req, res) => {
         connected: liveConnected,
         uniqueId,
         message: liveConnected ? `Listening to @${uniqueId}` : `Waiting for @${uniqueId} to go LIVE`,
-        gifts: recent,
+        gifts: recent.filter((item) => item.type === "gift"),
+        likes: recent.filter((item) => item.type === "like"),
       }),
     );
     return;
@@ -102,13 +144,20 @@ connection.on(WebcastEvent.GIFT, (data) => {
   if (!gift) return;
   console.log(`Gift: ${gift.user} · ${gift.count}× ${gift.coins} coin`);
   recent.push(gift);
-  if (recent.length > 50) recent.shift();
+  if (recent.length > 80) recent.shift();
   if (sockets.size === 0) {
     console.log("No game overlay connected. Open http://localhost:3000 in the captured browser.");
   } else {
     console.log(`Sending to ${sockets.size} overlay(s)`);
   }
   broadcast(gift);
+});
+
+connection.on(WebcastEvent.LIKE, (data) => {
+  const like = mapLike(data as unknown as Record<string, unknown>);
+  recent.push(like);
+  if (recent.length > 80) recent.shift();
+  broadcast(like);
 });
 
 function onDropped() {
