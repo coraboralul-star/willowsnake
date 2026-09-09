@@ -46,6 +46,7 @@ type Brain = {
   order: Int32Array;
   cellPath: number[];
   turn: number;
+  laneVert: boolean;
 };
 
 let brain: Brain | null = null;
@@ -378,9 +379,25 @@ function cellEdge(
   const cb = (((to / game.w) | 0) >> 1) * cw + ((to % game.w) >> 1);
   const toParent = cb === parents[ca];
   const toSame = cb === ca;
-  // cell-variant: prefer parent, then same cell, then new cells
-  const penalty = toParent ? 0 : toSame ? 499 : 2400;
-  return 1000 + penalty;
+  const continueDir = dir === game.facing ? -70 : 35;
+  let lane = 0;
+  if (!toSame && brain) {
+    const dcx = (cb % cw) - (ca % cw);
+    const dcy = ((cb / cw) | 0) - ((ca / cw) | 0);
+    if (brain.laneVert) lane = dcy !== 0 && dcx === 0 ? -50 : dcx !== 0 ? 110 : 0;
+    else lane = dcx !== 0 && dcy === 0 ? -50 : dcy !== 0 ? 110 : 0;
+  }
+  const right = RIGHT[dir];
+  let hug = 0;
+  if (inBounds(to, right, game.w, game.h)) {
+    const side = stepI(to, right, game.w);
+    if (game.occ[side]) hug = -30;
+  } else {
+    hug = -30;
+  }
+  // Prefer expanding 2-wide lanes over tight parent-retracing knots.
+  const penalty = toParent ? 120 : toSame ? 25 : lane;
+  return 1000 + penalty + continueDir + hug;
 }
 
 function cellTreeMove(game: View): Direction | null {
@@ -590,19 +607,14 @@ function phcMove(game: View, cycle: Int32Array, order: Int32Array): Direction | 
   if (game.apple < 0) return followCycle(game, cycle);
   const pos = game.snake[0];
   const tail = tailOf(game);
-  const fill = game.snake.length / game.n;
   const distGoal = cycleDistance(order, game.n, pos, game.apple);
   const distTail = cycleDistance(order, game.n, pos, tail);
   let maxShortcut = Math.min(distGoal, distTail - 3);
-  if (fill >= 0.48) {
-    maxShortcut = 0;
-  } else if (distGoal < distTail) {
+  if (game.snake.length > (game.n * 50) / 100) maxShortcut = 0;
+  if (distGoal < distTail) {
     maxShortcut -= 1;
     if ((distTail - distGoal) * 4 > game.n - game.snake.length) maxShortcut -= 10;
   }
-  const cap = fill < 0.22 ? 8 : fill < 0.35 ? 5 : 3;
-  if (maxShortcut > cap) maxShortcut = cap;
-
   let next = cycle[pos];
   let distNext = 1;
   if (maxShortcut > 0) {
@@ -643,12 +655,28 @@ function ensureBrain(state: GameState): Brain {
   const cycle = fromState ?? makeZigZag(w, h);
   const order = new Int32Array(w * h);
   fillOrder(cycle, order);
-  brain = { w, h, cycle, order, cellPath: [], turn: 0 };
+  brain = { w, h, cycle, order, cellPath: [], turn: 0, laneVert: Math.random() < 0.5 };
   return brain;
 }
 
 export function resetTwanvlBrain() {
   brain = null;
+}
+
+function tryCellHunt(game: View, cycle: Int32Array, order: Int32Array) {
+  const foods = game.foods
+    .slice()
+    .sort((a, b) => manhattanI(game.snake[0], a, game.w) - manhattanI(game.snake[0], b, game.w));
+  for (const food of foods) {
+    game.apple = food;
+    const cellDir = cellTreeMove(game);
+    if (cellDir && isLegal(game, cellDir)) {
+      const target = stepI(game.snake[0], cellDir, game.w);
+      if (repairCycle(game, cycle, game.snake[0], target)) fillOrder(cycle, order);
+      return cellDir;
+    }
+  }
+  return null;
 }
 
 export function pickTwanvlDir(state: GameState): Direction {
@@ -658,6 +686,13 @@ export function pickTwanvlDir(state: GameState): Direction {
   pickApple(game);
 
   if (game.apple >= 0) {
+    const cellDir = tryCellHunt(game, active.cycle, active.order);
+    if (cellDir) return cellDir;
+
+    const dhcr = dhcrMove(game, active.cycle);
+    fillOrder(active.cycle, active.order);
+    if (dhcr && isLegal(game, dhcr)) return dhcr;
+
     const phc = phcMove(game, active.cycle, active.order);
     if (phc && isLegal(game, phc)) return phc;
   }
