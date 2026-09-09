@@ -5,6 +5,7 @@ import confetti from "canvas-confetti";
 import {
   BASE_TICK,
   BOMB_MS,
+  BOMB_SHRINK,
   spinePath,
   type Bomb,
   type Direction,
@@ -38,6 +39,7 @@ type Floater = {
   life: number;
   max: number;
   text: string;
+  color?: string;
 };
 
 const COLORS = {
@@ -86,6 +88,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     let height = 0;
     let lastAte = 0;
     let lastBurst = 0;
+    let lastBombHit = 0;
     let lastTs = performance.now();
     const particles: Particle[] = [];
     const floaters: Floater[] = [];
@@ -140,6 +143,10 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         lastAte = state.ateAt;
         spawnBite(particles, floaters, state.snake[0], cell, canvas, state.score, state.pendingGrow);
       }
+      if (state.bombHitAt && state.bombHitAt !== lastBombHit) {
+        lastBombHit = state.bombHitAt;
+        spawnBombHit(particles, floaters, state.snake[0], cell);
+      }
       if (state.bombBurstAt && state.bombBurstAt !== lastBurst) {
         lastBurst = state.bombBurstAt;
         spawnBombBursts(particles, state.bombBurst, cell);
@@ -176,6 +183,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       lastTs = performance.now();
       lastAte = liveRef.current.ateAt;
       lastBurst = liveRef.current.bombBurstAt;
+      lastBombHit = liveRef.current.bombHitAt;
       if (visible) {
         resumeAudio();
         frame = requestAnimationFrame(draw);
@@ -634,6 +642,32 @@ function spawnBite(
   });
 }
 
+function spawnBombHit(
+  particles: Particle[],
+  floaters: Floater[],
+  head: Point,
+  cell: number,
+) {
+  const x = head.x * cell + cell / 2;
+  const y = head.y * cell + cell / 2;
+  floaters.push({ x, y, life: 0, max: 520, text: `-${BOMB_SHRINK}`, color: "#E53935" });
+
+  for (let i = 0; i < 10; i += 1) {
+    const angle = (Math.PI * 2 * i) / 10 + Math.random() * 0.4;
+    const speed = 0.05 + Math.random() * 0.08;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed * cell,
+      vy: Math.sin(angle) * speed * cell,
+      life: 0,
+      max: 240 + Math.random() * 160,
+      size: 1.4 + Math.random() * 2.2,
+      color: i % 2 === 0 ? "#E53935" : COLORS.bombLite,
+    });
+  }
+}
+
 function stepFx(particles: Particle[], floaters: Floater[], dt: number) {
   for (const particle of particles) {
     particle.life += dt;
@@ -676,7 +710,7 @@ function drawFx(
   for (const floater of floaters) {
     const t = 1 - floater.life / floater.max;
     ctx.globalAlpha = Math.max(0, t);
-    ctx.fillStyle = "#2A3324";
+    ctx.fillStyle = floater.color ?? "#2A3324";
     ctx.fillText(floater.text, floater.x, floater.y);
   }
   ctx.globalAlpha = 1;

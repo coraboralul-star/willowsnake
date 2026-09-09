@@ -33,6 +33,7 @@ type View = {
   n: number;
   snake: number[];
   occ: Uint8Array;
+  bombs: Set<number>;
   foods: number[];
   grow: number;
   apple: number;
@@ -45,6 +46,7 @@ type Brain = {
   cycle: Int32Array;
   order: Int32Array;
   cellPath: number[];
+  bombSig: string;
   turn: number;
 };
 
@@ -90,6 +92,7 @@ function growingInto(game: View, cell: number) {
 
 function blocked(game: View, cell: number, grow = growingInto(game, cell)) {
   if (cell < 0 || cell >= game.n) return true;
+  if (game.bombs.has(cell)) return true;
   if (!game.occ[cell]) return false;
   if (!grow && cell === tailOf(game)) return false;
   return true;
@@ -102,6 +105,7 @@ function cloneView(game: View): View {
     n: game.n,
     snake: game.snake.slice(),
     occ: game.occ.slice(),
+    bombs: new Set(game.bombs),
     foods: game.foods.slice(),
     grow: game.grow,
     apple: game.apple,
@@ -117,13 +121,15 @@ function toView(state: GameState, apple?: number): View {
   const occ = new Uint8Array(n);
   for (const cell of snake) occ[cell] = 1;
   const foods = state.foods.map((food) => idx(food.x, food.y, w));
-  for (const bomb of state.bombs) occ[idx(bomb.x, bomb.y, w)] = 1;
+  const bombs = new Set(state.bombs.map((bomb) => idx(bomb.x, bomb.y, w)));
+  for (const cell of bombs) occ[cell] = 1;
   return {
     w,
     h,
     n,
     snake,
     occ,
+    bombs,
     foods,
     grow: state.pendingGrow,
     apple: apple ?? foods[0] ?? INVALID,
@@ -137,9 +143,9 @@ function isLegal(game: View, dir: Direction) {
   return !blocked(game, stepI(game.snake[0], dir, game.w));
 }
 
-function anyLegal(game: View): Direction {
+function anyLegal(game: View): Direction | null {
   for (const dir of DIRS) if (isLegal(game, dir)) return dir;
-  return game.facing;
+  return null;
 }
 
 class MinHeap {
@@ -731,7 +737,7 @@ function ensureBrain(state: GameState): Brain {
   const cycle = fromState ?? makeZigZag(w, h);
   const order = new Int32Array(w * h);
   fillOrder(cycle, order);
-  brain = { w, h, cycle, order, cellPath: [], turn: 0 };
+  brain = { w, h, cycle, order, cellPath: [], bombSig: "", turn: 0 };
   return brain;
 }
 
@@ -756,39 +762,69 @@ function tryCellHunt(game: View, cycle: Int32Array, order: Int32Array) {
 }
 
 function takeBombIfTrapped(state: GameState, game: View): Direction | null {
-  if (state.bombs.length === 0) return null;
+  if (game.bombs.size === 0) return null;
   if (DIRS.some((dir) => isLegal(game, dir))) return null;
-  const bombAt = new Set(state.bombs.map((bomb) => idx(bomb.x, bomb.y, game.w)));
   for (const dir of DIRS) {
     if (dir === OPPOSITE[game.facing]) continue;
     if (!inBounds(game.snake[0], dir, game.w, game.h)) continue;
     const cell = stepI(game.snake[0], dir, game.w);
-    if (!bombAt.has(cell)) continue;
+    if (!game.bombs.has(cell)) continue;
     if (game.snake.includes(cell) && cell !== tailOf(game)) continue;
     return dir;
   }
   return null;
 }
 
+function intoBomb(game: View, dir: Direction) {
+  if (!inBounds(game.snake[0], dir, game.w, game.h)) return false;
+  return game.bombs.has(stepI(game.snake[0], dir, game.w));
+}
+
+function preferSafe(state: GameState, game: View, dir: Direction): Direction {
+  const safe = DIRS.filter((next) => isLegal(game, next));
+  if (safe.length === 0) return takeBombIfTrapped(state, game) ?? dir;
+  if (!intoBomb(game, dir) && isLegal(game, dir)) return dir;
+  if (isLegal(game, game.facing)) return game.facing;
+  const left = LEFT[game.facing];
+  const right = RIGHT[game.facing];
+  if (isLegal(game, left)) return left;
+  if (isLegal(game, right)) return right;
+  return safe[0];
+}
+
+function bombSig(state: GameState) {
+  if (state.bombs.length === 0) return "";
+  return state.bombs
+    .map((bomb) => `${bomb.x},${bomb.y}`)
+    .sort()
+    .join(";");
+}
+
 export function pickTwanvlDir(state: GameState): Direction {
   const game = toView(state);
   const active = ensureBrain(state);
+  const sig = bombSig(state);
+  if (active.bombSig !== sig) {
+    active.cellPath = [];
+    active.bombSig = sig;
+  }
   active.turn += 1;
   pickApple(game);
 
+  let picked: Direction | null = null;
   if (game.apple >= 0) {
-    const cellDir = tryCellHunt(game, active.cycle, active.order);
-    if (cellDir) return cellDir;
-
-    const dhcr = dhcrMove(game, active.cycle);
-    fillOrder(active.cycle, active.order);
-    if (dhcr && isLegal(game, dhcr)) return dhcr;
-
-    const phc = phcMove(game, active.cycle, active.order);
-    if (phc && isLegal(game, phc)) return phc;
+    picked = tryCellHunt(game, active.cycle, active.order);
+    if (!picked) {
+      const dhcr = dhcrMove(game, active.cycle);
+      fillOrder(active.cycle, active.order);
+      if (dhcr && isLegal(game, dhcr)) picked = dhcr;
+    }
+    if (!picked) {
+      const phc = phcMove(game, active.cycle, active.order);
+      if (phc && isLegal(game, phc)) picked = phc;
+    }
   }
 
-  const cycleDir = followCycle(game, active.cycle);
-  if (cycleDir) return cycleDir;
-  return takeBombIfTrapped(state, game) ?? anyLegal(game);
+  picked ??= followCycle(game, active.cycle) ?? takeBombIfTrapped(state, game) ?? anyLegal(game);
+  return preferSafe(state, game, picked ?? game.facing);
 }

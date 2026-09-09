@@ -30,6 +30,15 @@ export function pickAutoplayDir(state: GameState): Direction {
 }
 
 export function applyAutoplayDir(state: GameState, dir: Direction): GameState {
+  const head = state.snake[0];
+  const next = { x: head.x + DELTA[dir].x, y: head.y + DELTA[dir].y };
+  const hitsBomb = state.bombs.some((bomb) => bomb.x === next.x && bomb.y === next.y);
+  if (hitsBomb) {
+    const safe = DIRS.find(
+      (turn) => turn !== OPPOSITE[state.direction] && !isDeadly(state, turn),
+    );
+    if (safe) dir = safe;
+  }
   if (dir === OPPOSITE[state.direction] || dir === state.direction) {
     return { ...state, queued: [] };
   }

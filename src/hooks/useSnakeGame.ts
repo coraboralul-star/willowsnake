@@ -161,11 +161,12 @@ export function useSnakeGame(
 
   const queueAutoRetry = useCallback((won = false) => {
     if (!isAutoplay() || retryRef.current != null) return;
-    const wait = won ? 7000 + Math.pow(Math.random(), 2.4) * 5000 : 900 + Math.random() * 6100;
+    const wait = won
+      ? Math.max(7000, 7000 + Math.pow(Math.random(), 2.4) * 5000)
+      : 2500 + Math.random() * 4500;
     retryRef.current = window.setTimeout(() => {
       retryRef.current = null;
       startRef.current();
-      keysRef.current?.tapSpace();
     }, wait);
   }, []);
 
