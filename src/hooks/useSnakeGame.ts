@@ -13,6 +13,7 @@ import {
 import {
   applyGift,
   createGame,
+  DELTA,
   enqueueTurn,
   KEY_TO_DIR,
   startRun,
@@ -223,7 +224,13 @@ export function useSnakeGame(
         const facing = current.queued.at(0) ?? current.direction;
         const dir = pickAutoplayDir(current);
         current = applyAutoplayDir(current, dir);
-        if (!burst) keysRef.current?.onMove(dir, dir !== facing);
+        if (!burst) {
+          keysRef.current?.onMove(dir, {
+            turn: dir !== facing,
+            remain: openAhead(current, dir),
+            tickMs: current.tickMs,
+          });
+        }
       }
 
       const next = step(current, now);
@@ -376,6 +383,23 @@ export function useSnakeGame(
     steer,
     advance,
   };
+}
+
+function openAhead(state: GameState, dir: Direction) {
+  const delta = DELTA[dir];
+  const tail = state.snake[state.snake.length - 1];
+  const taken = new Set(state.snake.map((part) => `${part.x},${part.y}`));
+  let x = state.snake[0].x + delta.x;
+  let y = state.snake[0].y + delta.y;
+  let n = 0;
+  while (x >= 0 && y >= 0 && x < state.cols && y < state.rows) {
+    const atTail = x === tail.x && y === tail.y;
+    if (taken.has(`${x},${y}`) && (!atTail || state.pendingGrow > 0)) break;
+    n += 1;
+    x += delta.x;
+    y += delta.y;
+  }
+  return n;
 }
 
 function toUi(state: GameState): GameUi {

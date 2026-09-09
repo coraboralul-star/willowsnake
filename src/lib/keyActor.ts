@@ -4,6 +4,12 @@ import { DIR_TO_KEY } from "@/lib/autoplay";
 import type { Direction } from "@/lib/engine";
 import { playKeyDown, playKeyUp, type GameKey } from "@/lib/keyboardSounds";
 
+export type KeyPulse = {
+  turn: boolean;
+  remain: number;
+  tickMs: number;
+};
+
 type MoveKey = Exclude<GameKey, "space">;
 
 const NEIGHBORS: Record<MoveKey, MoveKey[]> = {
@@ -21,9 +27,17 @@ function pick<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+function chance(p: number) {
+  return Math.random() < p;
+}
+
 export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   let held: GameKey | null = null;
   let moving: MoveKey | null = null;
+  let runLen = 0;
+  let lastDir: Direction | null = null;
+  let remainNow = 0;
+  let tappedThisRun = false;
   let alive = true;
   const timers = new Set<number>();
 
@@ -59,80 +73,122 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
     light(null);
   }
 
-  function restab(key: MoveKey) {
-    later(rand(90, 680), () => {
-      if (held || moving !== key) return;
-      if (Math.random() < 0.72) startStraightHold(key);
-    });
-  }
-
-  function scheduleRelease(key: MoveKey, ms: number) {
+  function holdFor(key: MoveKey, ms: number) {
     later(ms, () => {
-      if (held !== key) return;
+      if (held !== key || moving !== key) return;
       release();
-      restab(key);
     });
   }
 
-  function scheduleSlip(main: MoveKey) {
-    later(rand(50, 420), () => {
-      if (held !== main || moving !== main) return;
-      const slip = pick(NEIGHBORS[main]);
-      playKeyUp(main);
-      playKeyDown(slip);
-      held = slip;
-      light(slip);
-      later(rand(22, 68), () => {
-        if (held !== slip) return;
-        playKeyUp(slip);
-        if (moving === main) {
-          playKeyDown(main);
-          held = main;
-          light(main);
-        } else {
+  function flickMs() {
+    return chance(0.25) ? rand(18, 40) : rand(36, 95);
+  }
+
+  function tapMs() {
+    return chance(0.15) ? rand(150, 240) : rand(48, 150);
+  }
+
+  function rareOverholdMs() {
+    return rand(260, 720);
+  }
+
+  function tap(key: MoveKey, ms: number) {
+    tappedThisRun = true;
+    press(key);
+    holdFor(key, ms);
+    if (ms >= 260 && chance(0.08)) {
+      later(rand(80, 220), () => {
+        if (held !== key || moving !== key) return;
+        const slip = pick(NEIGHBORS[key]);
+        playKeyDown(slip);
+        light(slip);
+        later(rand(24, 60), () => {
+          playKeyUp(slip);
+          if (held === key) light(key);
+        });
+      });
+    }
+  }
+
+  function swap(next: MoveKey, gapMs: number, ms: number) {
+    const prev = held;
+    if (prev && prev !== next) {
+      later(Math.max(0, gapMs), () => {
+        if (held === prev) {
+          playKeyUp(prev);
           held = null;
           light(null);
         }
+        later(rand(0, 16), () => {
+          if (!alive || moving !== next) return;
+          tap(next, ms);
+        });
       });
+      return;
+    }
+    later(gapMs, () => {
+      if (!alive || moving !== next) return;
+      tap(next, ms);
     });
   }
 
-  function startStraightHold(key: MoveKey) {
-    press(key);
-    const roll = Math.random();
-    const hold =
-      roll < 0.16
-        ? rand(70, 150)
-        : roll < 0.55
-          ? rand(180, 640)
-          : roll < 0.84
-            ? rand(720, 1600)
-            : rand(1700, 3400);
-    scheduleRelease(key, hold);
-    if (Math.random() < 0.2) scheduleSlip(key);
+  function pressMs(remain: number, prevRun: number) {
+    const tight = remain <= 3 || (prevRun <= 2 && remain <= 5);
+    if (tight) return flickMs();
+    const semiLong = remain >= 6 && remain <= 14;
+    if (semiLong && chance(0.08)) return rareOverholdMs();
+    return tapMs();
   }
 
-  function onMove(dir: Direction, isTurn: boolean) {
-    const key = DIR_TO_KEY[dir];
-    moving = key;
+  function handleTurn(key: MoveKey, prevRun: number, remain: number) {
+    const tight = remain <= 3 || (prevRun <= 2 && remain <= 5);
+    const travel = tight ? rand(0, 20) : rand(12, 55);
+    swap(key, travel, pressMs(remain, prevRun));
+  }
 
-    if (isTurn) {
+  function handleStraight(key: MoveKey, remain: number) {
+    if (held === key || held) return;
+    if (timers.size > 0) return;
+    if (remain <= 5) return;
+    if (!tappedThisRun) {
+      later(rand(30, 180), () => {
+        if (held || moving !== key || remainNow <= 5) return;
+        tap(key, tapMs());
+      });
+      return;
+    }
+    if (remain >= 9 && chance(0.04)) {
+      later(rand(280, 900), () => {
+        if (held || moving !== key || remainNow <= 6) return;
+        tap(key, tapMs());
+      });
+    }
+  }
+
+  function onMove(dir: Direction, pulse: KeyPulse) {
+    const key = DIR_TO_KEY[dir];
+    remainNow = pulse.remain;
+    const turned = pulse.turn || lastDir !== dir;
+    if (turned) {
+      const prevRun = runLen;
+      runLen = 1;
+      lastDir = dir;
+      moving = key;
+      tappedThisRun = held === key;
       clearTimers();
-      press(key);
-      scheduleRelease(key, rand(32, 92));
+      handleTurn(key, prevRun, pulse.remain);
       return;
     }
 
-    if (held === key || held) return;
-    if (timers.size > 0) return;
-    if (Math.random() < 0.4) startStraightHold(key);
-    else restab(key);
+    runLen += 1;
+    moving = key;
+    handleStraight(key, pulse.remain);
   }
 
   function tapSpace() {
     clearTimers();
     press("space");
-    later(rand(40, 90), () => {
+    later(rand(40, 110), () => {
       if (held === "space") release();
     });
   }
@@ -141,6 +197,10 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
     clearTimers();
     release();
     moving = null;
+    lastDir = null;
+    runLen = 0;
+    remainNow = 0;
+    tappedThisRun = false;
   }
 
   function dispose() {
