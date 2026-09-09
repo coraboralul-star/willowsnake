@@ -362,24 +362,69 @@ function cellTreeUnreachables(game: View, dists: Int32Array) {
   return { any, nearest, nearestDist };
 }
 
-function appleAlign(game: View, from: number, dir: Direction) {
+function clampPick(a: number, b: number, prefer: number, lo: number, hi: number) {
+  const options = [a, b].filter((v) => v >= lo && v < hi);
+  if (!options.length) return prefer;
+  return options.reduce((best, v) =>
+    Math.abs(v - prefer) < Math.abs(best - prefer) ? v : best,
+  );
+}
+
+function horizRailY(appleY: number, toward: "left" | "right", hy: number, h: number) {
+  if (toward === "right") {
+    if ((appleY & 1) === 1) return appleY;
+    return clampPick(appleY - 1, appleY + 1, hy, 0, h);
+  }
+  if ((appleY & 1) === 0) return appleY;
+  return clampPick(appleY - 1, appleY + 1, hy, 0, h);
+}
+
+function vertRailX(appleX: number, toward: "up" | "down", hx: number, w: number) {
+  if (toward === "down") {
+    if ((appleX & 1) === 0) return appleX;
+    return clampPick(appleX - 1, appleX + 1, hx, 0, w);
+  }
+  if ((appleX & 1) === 1) return appleX;
+  return clampPick(appleX - 1, appleX + 1, hx, 0, w);
+}
+
+function railAlign(game: View, from: number, dir: Direction) {
   if (game.apple < 0) return 0;
   const fx = from % game.w;
   const fy = (from / game.w) | 0;
   const ax = game.apple % game.w;
   const ay = (game.apple / game.w) | 0;
-  const onRow = fy === ay;
-  const onCol = fx === ax;
-  const toward =
-    (onRow && ((ax > fx && dir === "right") || (ax < fx && dir === "left"))) ||
-    (onCol && ((ay > fy && dir === "down") || (ay < fy && dir === "up")));
-  const away =
-    (onRow && ((ax > fx && dir === "left") || (ax < fx && dir === "right"))) ||
-    (onCol && ((ay > fy && dir === "up") || (ay < fy && dir === "down")));
-  if (toward) return -260;
-  if (away) return 200;
-  if (onRow && (dir === "up" || dir === "down")) return 180;
-  if (onCol && (dir === "left" || dir === "right")) return 180;
+  const to = stepI(from, dir, game.w);
+  if (to === game.apple) return -400;
+  const dx = ax - fx;
+  const dy = ay - fy;
+  const horizToward: "left" | "right" = dx >= 0 ? "right" : "left";
+  const vertToward: "up" | "down" = dy >= 0 ? "down" : "up";
+  const railY = horizRailY(ay, horizToward, fy, game.h);
+  const railX = vertRailX(ax, vertToward, fx, game.w);
+  const horizLead =
+    Math.abs(dx) > Math.abs(dy) ||
+    (Math.abs(dx) === Math.abs(dy) && (fy === railY || dir === horizToward));
+  if (horizLead && dx !== 0) {
+    const onRail = fy === railY;
+    if (onRail && dir === horizToward) return -260;
+    if (onRail && dir === OPPOSITE[horizToward]) return 200;
+    if (onRail && (dir === "up" || dir === "down")) return 180;
+    const closer = Math.abs((fy + DELTA[dir].y) - railY) < Math.abs(fy - railY);
+    if (!onRail && closer) return -140;
+    if (!onRail && dir === horizToward) return -40;
+    return 0;
+  }
+  if (dy !== 0) {
+    const onRail = fx === railX;
+    if (onRail && dir === vertToward) return -260;
+    if (onRail && dir === OPPOSITE[vertToward]) return 200;
+    if (onRail && (dir === "left" || dir === "right")) return 180;
+    const closer = Math.abs((fx + DELTA[dir].x) - railX) < Math.abs(fx - railX);
+    if (!onRail && closer) return -140;
+    if (!onRail && dir === vertToward) return -40;
+    return 0;
+  }
   return 0;
 }
 
@@ -399,7 +444,10 @@ function cellEdge(
   const cb = (((to / game.w) | 0) >> 1) * cw + ((to % game.w) >> 1);
   const toParent = cb === parents[ca];
   const toSame = cb === ca;
-  const continueDir = dir === game.facing ? -90 : dir === OPPOSITE[game.facing] ? 240 : 40;
+  const closer =
+    game.apple >= 0 && manhattanI(to, game.apple, game.w) < manhattanI(from, game.apple, game.w);
+  const continueDir =
+    dir === OPPOSITE[game.facing] ? 220 : dir === game.facing ? (closer ? -40 : 25) : closer ? -10 : 30;
   let lane = 0;
   if (!toSame && game.apple >= 0) {
     const acx = (game.apple % game.w) >> 1;
@@ -417,7 +465,7 @@ function cellEdge(
     hug = -30;
   }
   const penalty = toParent ? 140 : toSame ? 40 : lane;
-  return 1000 + penalty + continueDir + hug + appleAlign(game, from, dir);
+  return 1000 + penalty + continueDir + hug + railAlign(game, from, dir);
 }
 
 function cellTreeMove(game: View): Direction | null {
