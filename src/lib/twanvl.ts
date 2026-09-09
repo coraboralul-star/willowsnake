@@ -408,7 +408,7 @@ function railAlign(game: View, from: number, dir: Direction) {
   if (horizLead && dx !== 0) {
     const onRail = fy === railY;
     if (onRail && dir === horizToward) return -260;
-    if (onRail && dir === OPPOSITE[horizToward]) return 200;
+    if (dir === OPPOSITE[horizToward]) return 280;
     if (onRail && (dir === "up" || dir === "down")) return 180;
     const closer = Math.abs((fy + DELTA[dir].y) - railY) < Math.abs(fy - railY);
     if (!onRail && closer) return -140;
@@ -418,7 +418,7 @@ function railAlign(game: View, from: number, dir: Direction) {
   if (dy !== 0) {
     const onRail = fx === railX;
     if (onRail && dir === vertToward) return -260;
-    if (onRail && dir === OPPOSITE[vertToward]) return 200;
+    if (dir === OPPOSITE[vertToward]) return 280;
     if (onRail && (dir === "left" || dir === "right")) return 180;
     const closer = Math.abs((fx + DELTA[dir].x) - railX) < Math.abs(fx - railX);
     if (!onRail && closer) return -140;
@@ -444,8 +444,13 @@ function cellEdge(
   const cb = (((to / game.w) | 0) >> 1) * cw + ((to % game.w) >> 1);
   const toParent = cb === parents[ca];
   const toSame = cb === ca;
-  const closer =
-    game.apple >= 0 && manhattanI(to, game.apple, game.w) < manhattanI(from, game.apple, game.w);
+  const appleCell =
+    game.apple >= 0
+      ? ((((game.apple / game.w) | 0) >> 1) * cw + ((game.apple % game.w) >> 1))
+      : INVALID;
+  const progress =
+    game.apple >= 0 ? manhattanI(to, game.apple, game.w) - manhattanI(from, game.apple, game.w) : 0;
+  const closer = progress < 0;
   const continueDir =
     dir === OPPOSITE[game.facing] ? 220 : dir === game.facing ? (closer ? -40 : 25) : closer ? -10 : 30;
   let lane = 0;
@@ -464,8 +469,10 @@ function cellEdge(
   } else {
     hug = -30;
   }
-  const penalty = toParent ? 140 : toSame ? 40 : lane;
-  return 1000 + penalty + continueDir + hug + railAlign(game, from, dir);
+  // Hairpins loop the same 2x2 without getting closer. Stairs reduce manhattan.
+  const hairpin = toSame && progress >= 0 && cb !== appleCell && to !== game.apple;
+  const penalty = toParent ? 160 : hairpin ? 240 : toSame ? 20 : lane;
+  return 1000 + penalty + continueDir + hug + railAlign(game, from, dir) + progress * 70;
 }
 
 function cellTreeMove(game: View): Direction | null {
