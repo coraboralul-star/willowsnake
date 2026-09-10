@@ -184,21 +184,27 @@ export function startRun(state: GameState, now: number, dir?: Direction): GameSt
   return next;
 }
 
+export function expireBombs(state: GameState, now: number): GameState {
+  const expired = state.bombs.filter((bomb) => bomb.until > 0 && now >= bomb.until);
+  if (expired.length === 0) return state;
+  return {
+    ...state,
+    bombs: state.bombs.filter((bomb) => bomb.until <= 0 || now < bomb.until),
+    bombBurst: expired,
+    bombBurstAt: now,
+  };
+}
+
 export function step(state: GameState, now = state.tickStartedAt + state.tickMs): GameState {
   const queued = [...state.queued];
   const direction = queued.shift() ?? state.direction;
   const head = state.snake[0];
   const delta = DELTA[direction];
   const nextHead = { x: head.x + delta.x, y: head.y + delta.y };
-  let bombs = state.bombs;
-  let bombBurst = state.bombBurst;
-  let bombBurstAt = state.bombBurstAt;
-  const expired = bombs.filter((bomb) => bomb.until > 0 && now >= bomb.until);
-  if (expired.length > 0) {
-    bombBurst = expired;
-    bombBurstAt = now;
-    bombs = bombs.filter((bomb) => bomb.until <= 0 || now < bomb.until);
-  }
+  const cleared = expireBombs(state, now);
+  let bombs = cleared.bombs;
+  let bombBurst = cleared.bombBurst;
+  let bombBurstAt = cleared.bombBurstAt;
 
   if (
     nextHead.x < 0 ||

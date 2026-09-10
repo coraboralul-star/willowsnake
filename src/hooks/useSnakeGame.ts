@@ -16,6 +16,7 @@ import {
   createGame,
   DELTA,
   enqueueTurn,
+  expireBombs,
   KEY_TO_DIR,
   REWIND_MS,
   REWIND_PLAY_MS,
@@ -353,7 +354,7 @@ export function useSnakeGame(
     let advanced = false;
     const burst = now - playing.tickStartedAt >= playing.tickMs * 2;
     while (now - liveRef.current.tickStartedAt >= liveRef.current.tickMs) {
-      let current = liveRef.current;
+      let current = expireBombs(liveRef.current, now);
       if (current.hijacked && current.hijackUntil > 0 && now >= current.hijackUntil) {
         current = { ...current, hijacked: false, hijackUntil: 0, hijackStartedAt: 0 };
       }

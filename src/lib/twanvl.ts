@@ -48,6 +48,7 @@ type Brain = {
   cellPath: number[];
   bombSig: string;
   turn: number;
+  cycleLock: number;
 };
 
 let brain: Brain | null = null;
@@ -746,7 +747,7 @@ function ensureBrain(state: GameState): Brain {
   const cycle = fromState ?? makeZigZag(w, h);
   const order = new Int32Array(w * h);
   fillOrder(cycle, order);
-  brain = { w, h, cycle, order, cellPath: [], bombSig: "", turn: 0 };
+  brain = { w, h, cycle, order, cellPath: [], bombSig: "", turn: 0, cycleLock: 0 };
   return brain;
 }
 
@@ -825,22 +826,33 @@ function pickCellHuntDir(state: GameState): Direction {
   const active = ensureBrain(state);
   const sig = bombSig(state);
   if (active.bombSig !== sig) {
+    const before = active.bombSig ? active.bombSig.split(";").length : 0;
+    const after = sig ? sig.split(";").length : 0;
+    if (before > after) {
+      const fresh = cycleFromNext(state.cycleNext, active.w, active.h) ?? makeZigZag(active.w, active.h);
+      active.cycle = fresh;
+      fillOrder(active.cycle, active.order);
+      active.cycleLock = after === 0 ? 40 : 16;
+    }
     active.cellPath = [];
     active.bombSig = sig;
   }
   active.turn += 1;
   pickApple(game);
 
+  const bombsOut = game.bombs.size > 0;
+  const locked = active.cycleLock > 0;
+  if (active.cycleLock > 0) active.cycleLock -= 1;
   let picked: Direction | null = null;
-  if (game.apple >= 0 && !foodHeavy(state)) {
+  if (game.apple >= 0 && !foodHeavy(state) && !bombsOut && !locked) {
     picked = tryCellHunt(game, active.cycle, active.order);
   }
-  if (!picked && game.apple >= 0) {
+  if (!picked && game.apple >= 0 && !bombsOut && !locked) {
     const dhcr = dhcrMove(game, active.cycle);
     fillOrder(active.cycle, active.order);
     if (dhcr && isLegal(game, dhcr)) picked = dhcr;
   }
-  if (!picked && game.apple >= 0) {
+  if (!picked && game.apple >= 0 && !locked) {
     const phc = phcMove(game, active.cycle, active.order);
     if (phc && isLegal(game, phc)) picked = phc;
   }
@@ -907,6 +919,27 @@ function canEscape(game: View) {
   return DIRS.some((dir) => isLegal(game, dir));
 }
 
+function floodReach(game: View) {
+  const start = game.snake[0];
+  const seen = new Uint8Array(game.n);
+  const q = [start];
+  seen[start] = 1;
+  let room = 0;
+  for (let i = 0; i < q.length; i += 1) {
+    const cur = q[i];
+    for (const dir of DIRS) {
+      if (!inBounds(cur, dir, game.w, game.h)) continue;
+      const next = stepI(cur, dir, game.w);
+      if (seen[next]) continue;
+      if (blocked(game, next)) continue;
+      seen[next] = 1;
+      q.push(next);
+      room += 1;
+    }
+  }
+  return room;
+}
+
 function lookAhead(game: View, dir: Direction, depth: number): boolean {
   const after = stepView(game, dir);
   if (!after) return false;
@@ -925,7 +958,20 @@ function preferSafe(state: GameState, game: View, dir: Direction): Direction {
       : [];
   const shallow = safe.filter((next) => noBomb(next) && lookAhead(game, next, 1));
   const open = safe.filter(noBomb);
-  const pool = deep.length > 0 ? deep : shallow.length > 0 ? shallow : open.length > 0 ? open : safe;
+  let pool = deep.length > 0 ? deep : shallow.length > 0 ? shallow : open.length > 0 ? open : safe;
+
+  if (game.snake.length < game.n / 2) {
+    const rooms = new Map<Direction, number>();
+    for (const next of pool) {
+      const after = stepView(game, next);
+      rooms.set(next, after ? floodReach(after) : 0);
+    }
+    const best = Math.max(0, ...pool.map((next) => rooms.get(next) ?? 0));
+    const need = Math.min(best, Math.max(8, game.snake.length));
+    const roomy = pool.filter((next) => (rooms.get(next) ?? 0) >= need);
+    if (roomy.length > 0) pool = roomy;
+  }
+
   if (pool.includes(dir)) return dir;
   if (pool.includes(game.facing)) return game.facing;
   const left = LEFT[game.facing];
