@@ -32,8 +32,8 @@ export function GameApp({ enabled }: GameAppProps) {
   );
   const [giftTest, setGiftTest] = useState(false);
   const liveBest = Math.max(best, ui.score);
-  const isNewBest = ui.score > 0 && ui.score >= liveBest && ui.score > (best || 0);
   const overlay = ui.status === "over" || ui.status === "won" || ui.status === "paused";
+  const ended = ui.status === "over" || ui.status === "won";
 
   useEffect(() => {
     setGiftTest(isGiftTestMode());
@@ -115,7 +115,7 @@ export function GameApp({ enabled }: GameAppProps) {
         <div
           className={`board-frame relative min-w-0 w-[min(36rem,calc(100%-22.5rem))] transition-transform duration-300 ${
             ui.hijacked ? "scale-[1.08]" : ""
-          } ${ui.status === "over" ? "board-shake" : ""}`}
+          }`}
         >
           <GameBoard liveRef={liveRef} advance={advance} />
           <AnimatePresence>
@@ -131,18 +131,10 @@ export function GameApp({ enabled }: GameAppProps) {
             {overlay && ui.status !== "idle" && (
               <Overlay key={ui.status}>
                 <p className="font-display text-lg text-ink">
-                  {ui.status === "paused"
-                    ? "PAUSED"
-                    : ui.status === "won"
-                      ? "CLEARED"
-                      : isNewBest
-                        ? "NEW BEST"
-                        : "GAME OVER"}
+                  {ui.status === "paused" ? "PAUSED" : ui.status === "won" ? "CLEARED" : "GAME OVER"}
                 </p>
-                {ui.status !== "paused" && (
-                  <p className="mt-3 font-display text-2xl text-sage-deep">{ui.score}</p>
-                )}
-                {ui.status === "won" && <MatchRecap />}
+                {ended && <p className="mt-3 font-display text-2xl text-sage-deep">{ui.score}</p>}
+                {ended && <MatchRecap />}
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
                   {ui.status === "paused" ? (
                     <button type="button" className="btn-primary" onClick={togglePause}>

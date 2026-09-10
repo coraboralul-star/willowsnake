@@ -159,11 +159,9 @@ export function useSnakeGame(
   const startRef = useRef(start);
   startRef.current = start;
 
-  const queueAutoRetry = useCallback((won = false) => {
+  const queueAutoRetry = useCallback(() => {
     if (!isAutoplay() || retryRef.current != null) return;
-    const wait = won
-      ? Math.max(7000, 7000 + Math.pow(Math.random(), 2.4) * 5000)
-      : 2500 + Math.random() * 4500;
+    const wait = Math.max(7000, 7000 + Math.pow(Math.random(), 2.4) * 5000);
     retryRef.current = window.setTimeout(() => {
       retryRef.current = null;
       startRef.current();
@@ -275,7 +273,7 @@ export function useSnakeGame(
           !isAutoplay() && next.status === "over" && comboRef.current.pristine;
         setUi(toUi(next));
         onEndRef.current?.(next.snake.length);
-        if (isAutoplay()) queueAutoRetry(next.status === "won");
+        if (isAutoplay()) queueAutoRetry();
         return;
       }
     }

@@ -25,7 +25,6 @@ export const START_APPLES = 15;
 export const BOMB_MS = 10000;
 export const GIFT_BOMB_MS = 30000;
 export const BOMB_SHRINK = 3;
-export const MIN_SNAKE = 3;
 export const REWIND_MS = 30000;
 
 export type Bomb = Point & { from?: string; until: number };
@@ -247,7 +246,24 @@ export function step(state: GameState, now = state.tickStartedAt + state.tickMs)
   }
 
   if (hitBomb) {
-    for (let i = 0; i < BOMB_SHRINK && snake.length > MIN_SNAKE; i += 1) snake.pop();
+    if (snake.length <= BOMB_SHRINK) {
+      return {
+        ...state,
+        prevSnake: clonePoints(state.snake),
+        snake,
+        direction,
+        queued,
+        bombs,
+        bombBurst,
+        bombBurstAt,
+        pendingGrow,
+        status: "over",
+        ateAt: eating ? now : state.ateAt,
+        foodAt: eating ? now : state.foodAt,
+        bombHitAt: now,
+      };
+    }
+    for (let i = 0; i < BOMB_SHRINK; i += 1) snake.pop();
   }
 
   const filled = snake.length >= state.cols * state.rows;
