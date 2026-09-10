@@ -1,6 +1,7 @@
 "use client";
 
 export type GameKey = "w" | "a" | "s" | "d" | "space";
+export type KeyPace = "fast" | "normal";
 
 type Slice = [number, number];
 
@@ -13,18 +14,39 @@ type PackConfig = {
   definitions: Record<string, KeyDefinition>;
 };
 
+type Voice = {
+  sample: string;
+  rate: number;
+};
+
 const PACK_URL = "/sounds/keyboard/config.json";
 const AUDIO_URL = "/sounds/keyboard/oreo.ogg";
 const VOLUME = 0.62;
+const FAST_RATE_MIN = 1.08;
+const FAST_RATE_MAX = 1.16;
+const SLOW_NAMES = [
+  "Backspace",
+  "Enter",
+  "Tab",
+  "CapsLock",
+  "ShiftLeft",
+  "ShiftRight",
+  "ControlLeft",
+] as const;
 
 let audio: AudioContext | null = null;
 let buffer: AudioBuffer | null = null;
 let definitions: Record<string, KeyDefinition> = {};
-let pool: string[] = [];
+let fastPool: string[] = [];
+let slowPool: string[] = [];
+let fastBag: string[] = [];
+let slowBag: string[] = [];
+let lastSample: string | null = null;
+let pace: KeyPace = "normal";
 let loading: Promise<void> | null = null;
 let enabled = false;
 
-const held = new Map<GameKey, string>();
+const held = new Map<GameKey, Voice>();
 const down = new Set<GameKey>();
 
 function writeEnabled(value: boolean) {
@@ -38,12 +60,38 @@ function context() {
   return audio;
 }
 
-function buildPool(defs: Record<string, KeyDefinition>) {
-  return Object.keys(defs).filter((name) => name !== "Space" && defs[name]?.timing?.length >= 1);
+function shuffle(items: string[]) {
+  const next = items.slice();
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
+function takeFrom(pool: string[], bag: string[]) {
+  if (pool.length === 0) return null;
+  if (bag.length === 0) {
+    const fresh = shuffle(pool.filter((name) => name !== lastSample));
+    bag.push(...(fresh.length > 0 ? fresh : shuffle(pool)));
+  }
+  const next = bag.pop();
+  if (!next) return null;
+  lastSample = next;
+  return next;
+}
+
+function buildPools(defs: Record<string, KeyDefinition>) {
+  const names = Object.keys(defs).filter((name) => defs[name]?.timing?.length >= 1);
+  fastPool = names.filter((name) => /^Key[A-Z]$/.test(name) || /^Digit[0-9]$/.test(name));
+  slowPool = SLOW_NAMES.filter((name) => names.includes(name));
+  fastBag = [];
+  slowBag = [];
+  lastSample = null;
 }
 
 async function loadPack() {
-  if (buffer && pool.length > 0) return;
+  if (buffer && (fastPool.length > 0 || slowPool.length > 0)) return;
   if (loading) return loading;
 
   loading = (async () => {
@@ -55,7 +103,7 @@ async function loadPack() {
 
     const config = (await configRes.json()) as PackConfig;
     definitions = config.definitions ?? {};
-    pool = buildPool(definitions);
+    buildPools(definitions);
 
     const data = await audioRes.arrayBuffer();
     buffer = await ac.decodeAudioData(data.slice(0));
@@ -66,7 +114,7 @@ async function loadPack() {
   return loading;
 }
 
-function playSlice(slice: Slice | undefined) {
+function playSlice(slice: Slice | undefined, rate = 1) {
   const ac = context();
   if (!ac || !buffer || !slice) return;
 
@@ -76,15 +124,30 @@ function playSlice(slice: Slice | undefined) {
   const src = ac.createBufferSource();
   const gain = ac.createGain();
   src.buffer = buffer;
+  src.playbackRate.value = rate;
   gain.gain.value = VOLUME;
   src.connect(gain);
   gain.connect(ac.destination);
   src.start(ac.currentTime, offset, duration);
 }
 
-function pickSample() {
-  if (pool.length === 0) return null;
-  return pool[Math.floor(Math.random() * pool.length)] ?? null;
+function pickVoice(gameKey: GameKey): Voice | null {
+  if (gameKey === "space") {
+    const sample = definitions.Space ? "Space" : takeFrom(slowPool, slowBag);
+    return sample ? { sample, rate: 1 } : null;
+  }
+  if (pace === "fast") {
+    const sample = takeFrom(fastPool, fastBag);
+    if (!sample) return null;
+    const rate = FAST_RATE_MIN + Math.random() * (FAST_RATE_MAX - FAST_RATE_MIN);
+    return { sample, rate };
+  }
+  const sample = takeFrom(slowPool, slowBag);
+  return sample ? { sample, rate: 1 } : null;
+}
+
+export function setKeySoundPace(next: KeyPace) {
+  pace = next;
 }
 
 export function areKeySoundsEnabled() {
@@ -109,13 +172,13 @@ export function playKeyDown(gameKey: GameKey) {
 
   const strike = () => {
     if (!enabled || !down.has(gameKey) || held.has(gameKey)) return;
-    const sample = pickSample();
-    if (!sample) return;
-    held.set(gameKey, sample);
-    playSlice(definitions[sample]?.timing[0]);
+    const voice = pickVoice(gameKey);
+    if (!voice) return;
+    held.set(gameKey, voice);
+    playSlice(definitions[voice.sample]?.timing[0], voice.rate);
   };
 
-  if (buffer && pool.length > 0) {
+  if (buffer && (fastPool.length > 0 || slowPool.length > 0)) {
     strike();
     return;
   }
@@ -124,8 +187,8 @@ export function playKeyDown(gameKey: GameKey) {
 
 export function playKeyUp(gameKey: GameKey) {
   down.delete(gameKey);
-  const sample = held.get(gameKey);
+  const voice = held.get(gameKey);
   held.delete(gameKey);
-  if (!enabled || !sample) return;
-  playSlice(definitions[sample]?.timing[1] ?? definitions[sample]?.timing[0]);
+  if (!enabled || !voice) return;
+  playSlice(definitions[voice.sample]?.timing[1] ?? definitions[voice.sample]?.timing[0], voice.rate);
 }

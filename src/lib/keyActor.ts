@@ -1,8 +1,8 @@
 "use client";
 
 import { DIR_TO_KEY } from "@/lib/autoplay";
-import type { Direction } from "@/lib/engine";
-import { playKeyDown, playKeyUp, type GameKey } from "@/lib/keyboardSounds";
+import { NITRO_TICK, type Direction } from "@/lib/engine";
+import { playKeyDown, playKeyUp, setKeySoundPace, type GameKey } from "@/lib/keyboardSounds";
 
 export type KeyPulse = {
   turn: boolean;
@@ -166,6 +166,7 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   }
 
   function onMove(dir: Direction, pulse: KeyPulse) {
+    setKeySoundPace(pulse.tickMs <= NITRO_TICK ? "fast" : "normal");
     const key = DIR_TO_KEY[dir];
     remainNow = pulse.remain;
     const turned = pulse.turn || lastDir !== dir;
