@@ -12,8 +12,8 @@ export type KeyPulse = {
 
 type MoveKey = Exclude<GameKey, "space">;
 
-const FAST_RUN = 4;
-const FAST_GAP_MS = 280;
+const FAST_RUN = 3;
+const FAST_GAP_MS = 220;
 
 const NEIGHBORS: Record<MoveKey, MoveKey[]> = {
   w: ["a", "d"],
