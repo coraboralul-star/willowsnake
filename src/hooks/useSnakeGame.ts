@@ -17,7 +17,8 @@ import {
   DELTA,
   enqueueTurn,
   KEY_TO_DIR,
-  rewindGame,
+  REWIND_PLAY_MS,
+  rewindTape,
   startRun,
   step,
   type Direction,
@@ -25,7 +26,13 @@ import {
   type GameState,
   type GameStatus,
 } from "@/lib/engine";
-import { onLiveGift, onLiveLike, pushLiveAlert, resolveGift } from "@/lib/gifts";
+import {
+  onLiveGift,
+  onLiveLike,
+  pushLiveAlert,
+  resolveGift,
+  type GiftAction,
+} from "@/lib/gifts";
 import { recordMatchGift, recordMatchLike, resetMatchFeed } from "@/lib/matchFeed";
 import { createKeyActor } from "@/lib/keyActor";
 import {
@@ -84,6 +91,13 @@ export function useSnakeGame(
   const keysRef = useRef<ReturnType<typeof createKeyActor> | null>(null);
   const historyRef = useRef<GameSnap[]>([]);
   const spawnRef = useRef<GameState | null>(null);
+  const rewindRef = useRef<{
+    frames: GameSnap[];
+    startedAt: number;
+    shown: number;
+    duration: number;
+  } | null>(null);
+  const giftQueueRef = useRef<{ action: GiftAction; user?: string }[]>([]);
   const [ui, setUi] = useState<GameUi>(() => ({
     score: 3,
     status: "idle",
@@ -132,6 +146,8 @@ export function useSnakeGame(
     resetMatchFeed();
     historyRef.current = [];
     spawnRef.current = null;
+    rewindRef.current = null;
+    giftQueueRef.current = [];
     publish();
   }, [cols, rows, publish]);
 
@@ -151,6 +167,8 @@ export function useSnakeGame(
     liveRef.current = startRun(game, now);
     spawnRef.current = cloneGame(liveRef.current);
     historyRef.current = [{ at: now, state: spawnRef.current }];
+    rewindRef.current = null;
+    giftQueueRef.current = [];
     keysRef.current?.reset();
     beginRun();
     publish();
@@ -158,6 +176,8 @@ export function useSnakeGame(
 
   const startRef = useRef(start);
   startRef.current = start;
+  const beginRewindRef = useRef<(now: number) => void>(() => {});
+  const finishRewindRef = useRef<(now: number) => void>(() => {});
 
   const queueAutoRetry = useCallback(() => {
     if (!isAutoplay() || retryRef.current != null) return;
@@ -170,7 +190,7 @@ export function useSnakeGame(
 
   const togglePause = useCallback(() => {
     const current = liveRef.current;
-    if (current.hijacked) return;
+    if (current.hijacked || rewindRef.current) return;
     if (current.status === "playing") {
       if (!isAutoplay()) markDirty();
       keysRef.current?.reset();
@@ -195,7 +215,7 @@ export function useSnakeGame(
 
   const steer = useCallback(
     (dir: Direction) => {
-      if (isAutoplay() || liveRef.current.hijacked) return;
+      if (isAutoplay() || liveRef.current.hijacked || rewindRef.current) return;
       const now = performance.now();
       const current = liveRef.current;
       if (current.status === "idle") {
@@ -211,7 +231,109 @@ export function useSnakeGame(
     [beginRun, markDirty, publish],
   );
 
+  const finishRewind = useCallback((now: number) => {
+    const play = rewindRef.current;
+    rewindRef.current = null;
+    const land = play?.frames.at(-1)?.state;
+    const landedAt = play?.frames.at(-1)?.at ?? now;
+    let next = land
+      ? cloneGame(land)
+      : liveRef.current;
+    next.status = "playing";
+    next.queued = [];
+    next.tickStartedAt = now;
+    next.prevSnake = next.snake.map((part) => ({ ...part }));
+    historyRef.current = historyRef.current.filter(
+      (snap, index) => index === 0 || snap.at <= landedAt,
+    );
+    resetTwanvlBrain();
+    if (isAutoplay() && next.status === "playing") {
+      next = applyAutoplayDir(next, pickAutoplayDir(next));
+    }
+    liveRef.current = next;
+    const queued = giftQueueRef.current;
+    giftQueueRef.current = [];
+    for (const item of queued) {
+      if (item.action.rewind) {
+        beginRewindRef.current(performance.now());
+        break;
+      }
+      liveRef.current = applyGift(liveRef.current, item.action, now, item.user);
+    }
+    publish();
+  }, [publish]);
+
+  const beginRewind = useCallback(
+    (now: number) => {
+      const current = liveRef.current;
+      if (current.status !== "playing" && current.status !== "paused") return;
+      keysRef.current?.reset();
+      const frames = rewindTape(historyRef.current, current, now);
+      if (frames.length < 2) {
+        liveRef.current = {
+          ...cloneGame(frames[0]?.state ?? current),
+          status: "playing",
+          queued: [],
+          tickStartedAt: now,
+        };
+        resetTwanvlBrain();
+        if (isAutoplay()) {
+          liveRef.current = applyAutoplayDir(liveRef.current, pickAutoplayDir(liveRef.current));
+        }
+        publish();
+        return;
+      }
+      rewindRef.current = {
+        frames,
+        startedAt: now,
+        shown: -1,
+        duration: REWIND_PLAY_MS,
+      };
+      liveRef.current = {
+        ...current,
+        status: "playing",
+        glowUntil: Math.max(current.glowUntil, now + REWIND_PLAY_MS + 800),
+      };
+      publish();
+    },
+    [publish],
+  );
+
+  finishRewindRef.current = finishRewind;
+  beginRewindRef.current = beginRewind;
+
   const advance = useCallback((now: number) => {
+    const rewind = rewindRef.current;
+    if (rewind) {
+      const t = Math.min(1, (now - rewind.startedAt) / rewind.duration);
+      const eased = t * t;
+      const index = Math.min(
+        rewind.frames.length - 1,
+        Math.floor(eased * (rewind.frames.length - 1)),
+      );
+      if (index !== rewind.shown) {
+        const from = liveRef.current.snake;
+        const frame = cloneGame(rewind.frames[index].state);
+        frame.status = "playing";
+        frame.queued = [];
+        frame.prevSnake = from.map((part) => ({ ...part }));
+        frame.tickStartedAt = now;
+        frame.ateAt = 0;
+        frame.bombHitAt = 0;
+        frame.bombBurstAt = 0;
+        frame.hijacked = false;
+        frame.glowUntil = Math.max(frame.glowUntil, rewind.startedAt + rewind.duration + 800);
+        liveRef.current = frame;
+        rewind.shown = index;
+        const snapshot = toUi(frame);
+        setUi((prev) =>
+          prev.score === snapshot.score && prev.length === snapshot.length ? prev : snapshot,
+        );
+      }
+      if (t >= 1) finishRewindRef.current(now);
+      return;
+    }
+
     const playing = liveRef.current;
     if (playing.status !== "playing") return;
 
@@ -307,16 +429,10 @@ export function useSnakeGame(
       const coins = Math.max(0, gift.coins) * Math.max(1, gift.count ?? 1);
       recordMatchGift(gift.user, coins, gift.avatar, gift.uniqueId || gift.user);
       const now = performance.now();
-      if (action.rewind) {
-        liveRef.current = rewindGame(
-          historyRef.current,
-          spawnRef.current ?? liveRef.current,
-          now,
-        );
-        resetTwanvlBrain();
-        if (isAutoplay()) {
-          liveRef.current = applyAutoplayDir(liveRef.current, pickAutoplayDir(liveRef.current));
-        }
+      if (rewindRef.current) {
+        if (!action.rewind) giftQueueRef.current.push({ action, user: gift.user });
+      } else if (action.rewind) {
+        beginRewindRef.current(now);
       } else {
         liveRef.current = applyGift(liveRef.current, action, now, gift.user);
       }

@@ -162,7 +162,7 @@ export function resolveGift(gift: LiveGift): GiftAction {
     return snack(label, "bomb", { bombFlood: true, glowMs: 4000 });
   }
   if (unit === 200) {
-    return snack(label, "rewind", { rewind: true, glowMs: 1800 });
+    return snack(label, "rewind", { rewind: true, glowMs: 3600 });
   }
   return snack(label, "rose");
 }

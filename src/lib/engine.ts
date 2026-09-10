@@ -26,6 +26,7 @@ export const BOMB_MS = 10000;
 export const GIFT_BOMB_MS = 30000;
 export const BOMB_SHRINK = 3;
 export const REWIND_MS = 30000;
+export const REWIND_PLAY_MS = 2800;
 
 export type Bomb = Point & { from?: string; until: number };
 
@@ -481,6 +482,17 @@ export function rewindGame(history: GameSnap[], spawn: GameState, now: number): 
   restored.queued = [];
   restored.tickStartedAt = now;
   return restored;
+}
+
+export function rewindTape(history: GameSnap[], live: GameState, now: number): GameSnap[] {
+  const target = now - REWIND_MS;
+  const frames: GameSnap[] = [{ at: now, state: cloneGame(live) }];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const snap = history[i];
+    frames.push({ at: snap.at, state: cloneGame(snap.state) });
+    if (snap.at <= target) break;
+  }
+  return frames;
 }
 
 function emptyCells(state: GameState) {
