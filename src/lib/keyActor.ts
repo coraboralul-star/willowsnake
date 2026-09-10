@@ -12,6 +12,9 @@ export type KeyPulse = {
 
 type MoveKey = Exclude<GameKey, "space">;
 
+const FAST_RUN = 4;
+const FAST_GAP_MS = 280;
+
 const NEIGHBORS: Record<MoveKey, MoveKey[]> = {
   w: ["a", "d"],
   a: ["w", "s"],
@@ -62,7 +65,7 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   function press(key: GameKey) {
     if (held === key) return;
     const now = performance.now();
-    if (key !== "space" && lastPressAt > 0 && now - lastPressAt < 190) {
+    if (key !== "space" && lastPressAt > 0 && now - lastPressAt < FAST_GAP_MS) {
       setKeySoundPace("fast");
     }
     lastPressAt = now;
@@ -87,11 +90,11 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   }
 
   function flickMs() {
-    return chance(0.25) ? rand(18, 40) : rand(36, 95);
+    return chance(0.22) ? rand(40, 56) : rand(58, 74);
   }
 
   function tapMs() {
-    return chance(0.15) ? rand(150, 240) : rand(48, 150);
+    return chance(0.15) ? rand(150, 240) : rand(70, 160);
   }
 
   function rareOverholdMs() {
@@ -138,19 +141,25 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
     });
   }
 
+  function isQuickCut(prevRun: number) {
+    return prevRun > 0 && prevRun <= FAST_RUN;
+  }
+
+  function isTight(remain: number, prevRun: number) {
+    return remain <= 3 || (isQuickCut(prevRun) && remain <= 5);
+  }
+
   function pressMs(remain: number, prevRun: number) {
-    const tight = remain <= 3 || (prevRun <= 2 && remain <= 5);
-    if (tight) return flickMs();
+    if (isQuickCut(prevRun) || isTight(remain, prevRun)) return flickMs();
     const semiLong = remain >= 6 && remain <= 14;
     if (semiLong && chance(0.08)) return rareOverholdMs();
     return tapMs();
   }
 
   function handleTurn(key: MoveKey, prevRun: number, remain: number) {
-    const quickCut = prevRun > 0 && prevRun <= 2;
+    const quickCut = isQuickCut(prevRun);
     setKeySoundPace(quickCut ? "fast" : "normal");
-    const tight = remain <= 3 || (prevRun <= 2 && remain <= 5);
-    const travel = tight ? rand(0, 20) : rand(12, 55);
+    const travel = isTight(remain, prevRun) ? rand(0, 20) : rand(12, 55);
     swap(key, travel, pressMs(remain, prevRun));
   }
 
