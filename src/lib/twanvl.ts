@@ -51,6 +51,10 @@ type Brain = {
 };
 
 let brain: Brain | null = null;
+let inOpenHunt = false;
+
+const OPEN_HUNT_LEN = 20;
+const OPEN_HUNT_FREE = 0.55;
 
 function idx(x: number, y: number, w: number) {
   return y * w + x;
@@ -743,6 +747,96 @@ function ensureBrain(state: GameState): Brain {
 
 export function resetTwanvlBrain() {
   brain = null;
+  inOpenHunt = false;
+}
+
+function expandOrder(facing: Direction): Direction[] {
+  return [facing, LEFT[facing], RIGHT[facing], OPPOSITE[facing]];
+}
+
+function isOpenHunt(state: GameState) {
+  const n = state.cols * state.rows;
+  const free = n - state.snake.length - state.bombs.length;
+  return state.snake.length < OPEN_HUNT_LEN && free > n * OPEN_HUNT_FREE;
+}
+
+function firstStepDir(came: Int32Array, from: number, to: number, w: number): Direction | null {
+  let cur = to;
+  let prev = came[cur];
+  while (prev !== ROOT && prev !== from) {
+    if (cur === INVALID || prev === INVALID) return null;
+    cur = prev;
+    prev = came[cur];
+  }
+  if (prev !== from) return null;
+  return dirBetween(from, cur, w);
+}
+
+function bfsToFood(game: View, goal: number): Direction | null {
+  const head = game.snake[0];
+  if (head === goal) return null;
+  const came = new Int32Array(game.n).fill(INVALID);
+  const q = [head];
+  came[head] = ROOT;
+  for (let i = 0; i < q.length; i += 1) {
+    const cur = q[i];
+    const facing = cur === head ? game.facing : (dirBetween(came[cur], cur, game.w) ?? game.facing);
+    for (const dir of expandOrder(facing)) {
+      if (!inBounds(cur, dir, game.w, game.h)) continue;
+      const next = stepI(cur, dir, game.w);
+      if (came[next] !== INVALID) continue;
+      if (next !== goal && blocked(game, next)) continue;
+      if (next === goal && game.bombs.has(next)) continue;
+      came[next] = cur;
+      if (next === goal) {
+        const step = firstStepDir(came, head, goal, game.w);
+        return step && isLegal(game, step) ? step : null;
+      }
+      q.push(next);
+    }
+  }
+  return null;
+}
+
+function pickOpenHuntDir(state: GameState): Direction {
+  const game = toView(state);
+  const foods = game.foods
+    .slice()
+    .sort((a, b) => manhattanI(game.snake[0], a, game.w) - manhattanI(game.snake[0], b, game.w));
+  for (const food of foods) {
+    const dir = bfsToFood(game, food);
+    if (dir) return dir;
+  }
+  return preferSafe(state, game, anyLegal(game) ?? game.facing);
+}
+
+function pickCellHuntDir(state: GameState): Direction {
+  const game = toView(state);
+  const active = ensureBrain(state);
+  const sig = bombSig(state);
+  if (active.bombSig !== sig) {
+    active.cellPath = [];
+    active.bombSig = sig;
+  }
+  active.turn += 1;
+  pickApple(game);
+
+  let picked: Direction | null = null;
+  if (game.apple >= 0) {
+    picked = tryCellHunt(game, active.cycle, active.order);
+    if (!picked) {
+      const dhcr = dhcrMove(game, active.cycle);
+      fillOrder(active.cycle, active.order);
+      if (dhcr && isLegal(game, dhcr)) picked = dhcr;
+    }
+    if (!picked) {
+      const phc = phcMove(game, active.cycle, active.order);
+      if (phc && isLegal(game, phc)) picked = phc;
+    }
+  }
+
+  picked ??= followCycle(game, active.cycle) ?? takeBombIfTrapped(state, game) ?? anyLegal(game);
+  return preferSafe(state, game, picked ?? game.facing);
 }
 
 function tryCellHunt(game: View, cycle: Int32Array, order: Int32Array) {
@@ -801,30 +895,12 @@ function bombSig(state: GameState) {
 }
 
 export function pickTwanvlDir(state: GameState): Direction {
-  const game = toView(state);
-  const active = ensureBrain(state);
-  const sig = bombSig(state);
-  if (active.bombSig !== sig) {
-    active.cellPath = [];
-    active.bombSig = sig;
+  if (isOpenHunt(state)) {
+    inOpenHunt = true;
+    return pickOpenHuntDir(state);
   }
-  active.turn += 1;
-  pickApple(game);
-
-  let picked: Direction | null = null;
-  if (game.apple >= 0) {
-    picked = tryCellHunt(game, active.cycle, active.order);
-    if (!picked) {
-      const dhcr = dhcrMove(game, active.cycle);
-      fillOrder(active.cycle, active.order);
-      if (dhcr && isLegal(game, dhcr)) picked = dhcr;
-    }
-    if (!picked) {
-      const phc = phcMove(game, active.cycle, active.order);
-      if (phc && isLegal(game, phc)) picked = phc;
-    }
+  if (inOpenHunt) {
+    resetTwanvlBrain();
   }
-
-  picked ??= followCycle(game, active.cycle) ?? takeBombIfTrapped(state, game) ?? anyLegal(game);
-  return preferSafe(state, game, picked ?? game.facing);
+  return pickCellHuntDir(state);
 }
