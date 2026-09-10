@@ -21,7 +21,7 @@ export type FoodKind = "apple" | "golden" | "heart";
 export type Food = Point & { kind: FoodKind; from?: string };
 
 export const START_BOMBS = 15;
-export const START_APPLES = 15;
+export const START_APPLES = 30;
 export const BOMB_MS = 10000;
 export const GIFT_BOMB_MS = 30000;
 export const BOMB_SHRINK = 3;
@@ -171,6 +171,8 @@ export function startRun(state: GameState, now: number, dir?: Direction): GameSt
   let next: GameState = {
     ...state,
     status: "playing",
+    tickMs: NITRO_TICK,
+    nitroUntil: now + BOMB_MS,
     bombs: state.bombs.map((bomb) => ({
       ...bomb,
       until: bomb.until > 0 ? bomb.until : now + BOMB_MS,
