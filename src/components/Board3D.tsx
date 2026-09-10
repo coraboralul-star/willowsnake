@@ -67,10 +67,11 @@ export function Board3D({ liveRef, topGifter, skin = SNAKE_SKINS.mint }: Board3D
 
 function LookAt() {
   useFrame(({ camera }) => {
-    camera.position.set(0, 18.5, 4.58);
-    camera.fov = 37.4;
-    camera.updateProjectionMatrix();
-    camera.lookAt(0, 0.22, 0.12);
+    const cam = camera as THREE.PerspectiveCamera;
+    cam.position.set(0, 18.5, 4.58);
+    cam.fov = 37.4;
+    cam.updateProjectionMatrix();
+    cam.lookAt(0, 0.22, 0.12);
   });
   return null;
 }
