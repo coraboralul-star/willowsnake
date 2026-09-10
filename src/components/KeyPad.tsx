@@ -20,15 +20,15 @@ const KEYS: { id: GameKey; dir: Direction; label: string; className: string }[] 
   { id: "d", dir: "right", label: "D", className: "col-start-3 row-start-2" },
 ];
 
-export const SIDE_RAIL_CLASS = "w-[168px] shrink-0";
+export const SIDE_RAIL_CLASS = "w-[108px] shrink-0";
 
 export function SideRailSlot({ children }: { children: ReactNode }) {
   return (
     <div className={`${SIDE_RAIL_CLASS} relative`}>
       <div className="invisible pointer-events-none select-none" aria-hidden>
-        <div className="flex flex-col items-center gap-3">
-          <div className="grid h-[6.5rem] w-[168px] grid-cols-3 grid-rows-2 gap-2" />
-          <div className="h-12 w-[168px]" />
+        <div className="flex flex-col items-center gap-2">
+          <div className="grid h-[4.6rem] w-[108px] grid-cols-3 grid-rows-2 gap-1" />
+          <div className="h-9 w-[108px]" />
         </div>
       </div>
       <div className="absolute inset-0">{children}</div>
@@ -42,8 +42,8 @@ export function KeyPad({ heldKey, onSteer, onPause, onRetry, status }: KeyPadPro
   const paused = status === "paused";
 
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="grid w-[168px] grid-cols-3 grid-rows-2 gap-2">
+    <div className="flex flex-col items-center gap-2">
+      <div className="grid w-[108px] grid-cols-3 grid-rows-2 gap-1">
         {KEYS.map((key) => {
           const active = heldKey === key.id;
           return (
@@ -62,7 +62,7 @@ export function KeyPad({ heldKey, onSteer, onPause, onRetry, status }: KeyPadPro
               onClick={(event) => {
                 if (event.detail === 0) onSteer(key.dir);
               }}
-              className={`keycap ${key.className} ${active ? "keycap-active" : ""}`}
+              className={`keycap keycap-sm ${key.className} ${active ? "keycap-active" : ""}`}
             >
               {key.label}
             </button>
@@ -71,7 +71,7 @@ export function KeyPad({ heldKey, onSteer, onPause, onRetry, status }: KeyPadPro
       </div>
       <button
         type="button"
-        className="keycap w-[168px] text-[0.62rem]"
+        className="keycap keycap-sm w-[108px] !text-[0.48rem]"
         onPointerDown={(event) => {
           if (idle || retry) return;
           event.currentTarget.setPointerCapture(event.pointerId);

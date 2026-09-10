@@ -11,11 +11,11 @@ export function HomeClient() {
   const onDone = useCallback(() => setReady(true), []);
 
   return (
-    <main className="relative flex min-h-dvh flex-col items-center overflow-x-hidden px-5 py-4 sm:px-8 sm:py-6">
+    <main className="relative flex min-h-dvh flex-col items-center overflow-x-hidden px-3 py-3 sm:px-5 sm:py-4">
       <ArcadeBackdrop />
       <AnimatePresence>{!ready && <Loader key="loader" onDone={onDone} />}</AnimatePresence>
       <motion.div
-        className="relative z-10 mx-auto w-full max-w-6xl"
+        className="relative z-10 mx-auto w-full max-w-7xl"
         initial={false}
         animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 10 }}
         transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}

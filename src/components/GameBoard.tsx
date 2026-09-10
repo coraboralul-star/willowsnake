@@ -20,6 +20,9 @@ import { resumeAudio } from "@/lib/sfx";
 type GameBoardProps = {
   liveRef: RefObject<GameState>;
   advance: (now: number) => void;
+  canvasRef?: RefObject<HTMLCanvasElement | null>;
+  textureSize?: number;
+  onReady?: (canvas: HTMLCanvasElement) => void;
 };
 
 type Particle = {
@@ -65,8 +68,9 @@ const COLORS = {
   giftBombGlow: "rgba(156, 39, 176, 0.32)",
 };
 
-export function GameBoard({ liveRef, advance }: GameBoardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export function GameBoard({ liveRef, advance, canvasRef: canvasRefProp, textureSize, onReady }: GameBoardProps) {
+  const localCanvas = useRef<HTMLCanvasElement>(null);
+  const canvasRef = canvasRefProp ?? localCanvas;
   const wrapRef = useRef<HTMLDivElement>(null);
   const advanceRef = useRef(advance);
 
@@ -101,7 +105,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
     const resize = () => {
       const cols = liveRef.current.cols;
       const rows = liveRef.current.rows;
-      const size = Math.floor(wrap.clientWidth);
+      const size = Math.floor(textureSize || wrap.clientWidth);
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = size;
       height = Math.floor((size * rows) / cols);
@@ -118,6 +122,7 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
         boardCtx.imageSmoothingEnabled = false;
         drawBoard(boardCtx, width, height, cols, rows, width / cols);
       }
+      if (canvas) onReady?.(canvas);
     };
 
     const observer = new ResizeObserver(resize);
@@ -204,16 +209,19 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
             ? ["#4A148C", "#FF6F00", "#FFF8E7"]
             : ["#E53935", "#43A047", "#F9A825", "#FFF8E7"];
       if (alert.tone !== "rewind") {
+        const offscreen = Boolean(textureSize) || rect.left < -100;
         confetti({
           particleCount: alert.tone === "rose" ? 24 : 90,
           spread: 72,
           startVelocity: 32,
           gravity: 0.85,
           ticks: 180,
-          origin: {
-            x: (rect.left + rect.width / 2) / window.innerWidth,
-            y: (rect.top + rect.height * 0.35) / window.innerHeight,
-          },
+          origin: offscreen
+            ? { x: 0.5, y: 0.38 }
+            : {
+                x: (rect.left + rect.width / 2) / window.innerWidth,
+                y: (rect.top + rect.height * 0.35) / window.innerHeight,
+              },
           colors: palette,
         });
       }
@@ -227,17 +235,21 @@ export function GameBoard({ liveRef, advance }: GameBoardProps) {
       cancelAnimationFrame(frame);
       window.clearInterval(ticker);
     };
-  }, [liveRef]);
+  }, [liveRef, textureSize, onReady]);
 
   return (
     <div
       ref={wrapRef}
-      className="relative w-full"
-      style={{ aspectRatio: `${liveRef.current.cols} / ${liveRef.current.rows}` }}
+      className={textureSize ? "pointer-events-none" : "relative w-full"}
+      style={
+        textureSize
+          ? { width: textureSize, height: textureSize }
+          : { aspectRatio: `${liveRef.current.cols} / ${liveRef.current.rows}` }
+      }
     >
       <canvas
         ref={canvasRef}
-        className="h-full w-full rounded-[1.2rem]"
+        className={textureSize ? "h-full w-full" : "h-full w-full rounded-[1.2rem]"}
         aria-label="Snake game board"
       />
     </div>

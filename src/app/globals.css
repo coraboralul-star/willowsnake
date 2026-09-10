@@ -137,6 +137,13 @@ body {
   box-shadow: 0 4px 0 #d7ccae;
 }
 
+.keycap-sm {
+  height: 2.15rem;
+  border-radius: 0.5rem;
+  font-size: 0.58rem;
+  box-shadow: 0 3px 0 #d7ccae;
+}
+
 .keycap-active {
   background: var(--sage);
   color: var(--cream);

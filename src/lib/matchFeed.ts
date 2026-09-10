@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 export type MatchViewer = {
   id: string;
   user: string;
@@ -66,4 +68,17 @@ export function onMatchFeed(listener: Listener) {
   return () => {
     listeners.delete(listener);
   };
+}
+
+export function useTopGifter() {
+  const [top, setTop] = useState<MatchViewer | null>(null);
+  useEffect(() => {
+    const sync = () => {
+      const next = matchGifters()[0] ?? null;
+      setTop(next && next.coins > 0 ? next : null);
+    };
+    sync();
+    return onMatchFeed(sync);
+  }, []);
+  return top;
 }

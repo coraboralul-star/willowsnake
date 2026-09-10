@@ -670,6 +670,7 @@ function dhcrMove(game: View, cycle: Int32Array): Direction | null {
   const dists = cycleDistancesTo(cycle, game.apple);
   const edge = (from: number, to: number, _dir: Direction) => {
     if (snakeOccupied(game, to) && to !== game.apple) return INT_MAX;
+    if (game.foods.includes(to) && to !== game.apple) return INT_MAX;
     return 1_000_000 + dists[to];
   };
   const steps = astar(game.n, game.w, game.h, edge, pos, game.apple, 1_000_000);
@@ -679,7 +680,11 @@ function dhcrMove(game: View, cycle: Int32Array): Direction | null {
     return followCycle(game, cycle);
   }
   repairCycle(game, cycle, pos, target);
-  return followCycle(game, cycle);
+  const along = followCycle(game, cycle);
+  if (along && isLegal(game, along) && !intoBomb(game, along)) return along;
+  const dir = dirBetween(pos, target, game.w);
+  if (dir && isLegal(game, dir) && !intoBomb(game, dir)) return dir;
+  return along;
 }
 
 function followCycle(game: View, cycle: Int32Array): Direction | null {
@@ -757,7 +762,11 @@ function expandOrder(facing: Direction): Direction[] {
 function isOpenHunt(state: GameState) {
   const n = state.cols * state.rows;
   const free = n - state.snake.length - state.bombs.length;
-  return state.snake.length < OPEN_HUNT_LEN && free > n * OPEN_HUNT_FREE;
+  return (
+    state.foods.length <= 1 &&
+    state.snake.length < OPEN_HUNT_LEN &&
+    free > n * OPEN_HUNT_FREE
+  );
 }
 
 function firstStepDir(came: Int32Array, from: number, to: number, w: number): Direction | null {
@@ -786,6 +795,7 @@ function bfsToFood(game: View, goal: number): Direction | null {
       const next = stepI(cur, dir, game.w);
       if (came[next] !== INVALID) continue;
       if (next !== goal && blocked(game, next)) continue;
+      if (next !== goal && game.foods.includes(next)) continue;
       if (next === goal && game.bombs.has(next)) continue;
       came[next] = cur;
       if (next === goal) {
@@ -822,17 +832,17 @@ function pickCellHuntDir(state: GameState): Direction {
   pickApple(game);
 
   let picked: Direction | null = null;
-  if (game.apple >= 0) {
+  if (game.apple >= 0 && !foodHeavy(state)) {
     picked = tryCellHunt(game, active.cycle, active.order);
-    if (!picked) {
-      const dhcr = dhcrMove(game, active.cycle);
-      fillOrder(active.cycle, active.order);
-      if (dhcr && isLegal(game, dhcr)) picked = dhcr;
-    }
-    if (!picked) {
-      const phc = phcMove(game, active.cycle, active.order);
-      if (phc && isLegal(game, phc)) picked = phc;
-    }
+  }
+  if (!picked && game.apple >= 0) {
+    const dhcr = dhcrMove(game, active.cycle);
+    fillOrder(active.cycle, active.order);
+    if (dhcr && isLegal(game, dhcr)) picked = dhcr;
+  }
+  if (!picked && game.apple >= 0) {
+    const phc = phcMove(game, active.cycle, active.order);
+    if (phc && isLegal(game, phc)) picked = phc;
   }
 
   picked ??= followCycle(game, active.cycle) ?? takeBombIfTrapped(state, game) ?? anyLegal(game);
@@ -874,16 +884,55 @@ function intoBomb(game: View, dir: Direction) {
   return game.bombs.has(stepI(game.snake[0], dir, game.w));
 }
 
+function stepView(game: View, dir: Direction): View | null {
+  if (!isLegal(game, dir)) return null;
+  const next = stepI(game.snake[0], dir, game.w);
+  const after = cloneView(game);
+  const eat = after.foods.includes(next);
+  after.snake.unshift(next);
+  after.occ[next] = 1;
+  after.facing = dir;
+  if (eat) {
+    after.foods = after.foods.filter((food) => food !== next);
+  } else if (after.grow > 0) {
+    after.grow -= 1;
+  } else {
+    const tail = after.snake.pop();
+    if (tail != null) after.occ[tail] = 0;
+  }
+  return after;
+}
+
+function canEscape(game: View) {
+  return DIRS.some((dir) => isLegal(game, dir));
+}
+
+function lookAhead(game: View, dir: Direction, depth: number): boolean {
+  const after = stepView(game, dir);
+  if (!after) return false;
+  if (depth <= 1) return canEscape(after);
+  return DIRS.some((next) => lookAhead(after, next, depth - 1));
+}
+
 function preferSafe(state: GameState, game: View, dir: Direction): Direction {
   const safe = DIRS.filter((next) => isLegal(game, next));
   if (safe.length === 0) return takeBombIfTrapped(state, game) ?? dir;
-  if (!intoBomb(game, dir) && isLegal(game, dir)) return dir;
-  if (isLegal(game, game.facing)) return game.facing;
+  const noBomb = (next: Direction) => !intoBomb(game, next);
+  const depth = game.snake.length < 80 ? 3 : 2;
+  const deep =
+    game.snake.length < game.n - 8
+      ? safe.filter((next) => noBomb(next) && lookAhead(game, next, depth))
+      : [];
+  const shallow = safe.filter((next) => noBomb(next) && lookAhead(game, next, 1));
+  const open = safe.filter(noBomb);
+  const pool = deep.length > 0 ? deep : shallow.length > 0 ? shallow : open.length > 0 ? open : safe;
+  if (pool.includes(dir)) return dir;
+  if (pool.includes(game.facing)) return game.facing;
   const left = LEFT[game.facing];
   const right = RIGHT[game.facing];
-  if (isLegal(game, left)) return left;
-  if (isLegal(game, right)) return right;
-  return safe[0];
+  if (pool.includes(left)) return left;
+  if (pool.includes(right)) return right;
+  return pool[0];
 }
 
 function bombSig(state: GameState) {
@@ -894,13 +943,18 @@ function bombSig(state: GameState) {
     .join(";");
 }
 
+function foodHeavy(state: GameState) {
+  return state.foods.length >= 2;
+}
+
 export function pickTwanvlDir(state: GameState): Direction {
-  if (isOpenHunt(state)) {
+  if (!foodHeavy(state) && isOpenHunt(state)) {
     inOpenHunt = true;
     return pickOpenHuntDir(state);
   }
   if (inOpenHunt) {
     resetTwanvlBrain();
+    inOpenHunt = false;
   }
   return pickCellHuntDir(state);
 }

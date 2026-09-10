@@ -492,6 +492,8 @@ export function rewindTape(history: GameSnap[], live: GameState, now: number): G
   const frames: GameSnap[] = [{ at: now, state: cloneGame(live) }];
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const snap = history[i];
+    const newer = frames[frames.length - 1];
+    if (newer.at - snap.at > 2500) break;
     frames.push({ at: snap.at, state: cloneGame(snap.state) });
     if (snap.at <= target) break;
   }

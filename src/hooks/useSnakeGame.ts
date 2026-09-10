@@ -17,6 +17,7 @@ import {
   DELTA,
   enqueueTurn,
   KEY_TO_DIR,
+  REWIND_MS,
   REWIND_PLAY_MS,
   rewindTape,
   shiftGameClock,
@@ -236,7 +237,6 @@ export function useSnakeGame(
     const play = rewindRef.current;
     rewindRef.current = null;
     const land = play?.frames.at(-1);
-    const landedAt = land?.at ?? now;
     let next = land
       ? shiftGameClock(cloneGame(land.state), now - land.at)
       : liveRef.current;
@@ -244,9 +244,7 @@ export function useSnakeGame(
     next.queued = [];
     next.tickStartedAt = now;
     next.prevSnake = next.snake.map((part) => ({ ...part }));
-    historyRef.current = historyRef.current.filter(
-      (snap, index) => index === 0 || snap.at <= landedAt,
-    );
+    historyRef.current = [{ at: now, state: cloneGame(next) }];
     resetTwanvlBrain();
     if (isAutoplay() && next.status === "playing") {
       next = applyAutoplayDir(next, pickAutoplayDir(next));
@@ -385,8 +383,8 @@ export function useSnakeGame(
       advanced = true;
       if (next.status === "playing") {
         historyRef.current.push({ at: now, state: cloneGame(next) });
-        const keep = now - 30000;
-        historyRef.current = historyRef.current.filter((snap, index) => index === 0 || snap.at >= keep);
+        const keep = now - REWIND_MS;
+        historyRef.current = historyRef.current.filter((snap) => snap.at >= keep);
       }
 
       if (!burst && next.score > current.score) playEat();
