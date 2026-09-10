@@ -1,7 +1,7 @@
 "use client";
 
 import { DIR_TO_KEY } from "@/lib/autoplay";
-import { NITRO_TICK, type Direction } from "@/lib/engine";
+import type { Direction } from "@/lib/engine";
 import { playKeyDown, playKeyUp, setKeySoundPace, type GameKey } from "@/lib/keyboardSounds";
 
 export type KeyPulse = {
@@ -38,6 +38,7 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   let lastDir: Direction | null = null;
   let remainNow = 0;
   let tappedThisRun = false;
+  let lastPressAt = 0;
   let alive = true;
   const timers = new Set<number>();
 
@@ -60,6 +61,11 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
 
   function press(key: GameKey) {
     if (held === key) return;
+    const now = performance.now();
+    if (key !== "space" && lastPressAt > 0 && now - lastPressAt < 190) {
+      setKeySoundPace("fast");
+    }
+    lastPressAt = now;
     if (held) playKeyUp(held);
     playKeyDown(key);
     held = key;
@@ -141,12 +147,15 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   }
 
   function handleTurn(key: MoveKey, prevRun: number, remain: number) {
+    const quickCut = prevRun > 0 && prevRun <= 2;
+    setKeySoundPace(quickCut ? "fast" : "normal");
     const tight = remain <= 3 || (prevRun <= 2 && remain <= 5);
     const travel = tight ? rand(0, 20) : rand(12, 55);
     swap(key, travel, pressMs(remain, prevRun));
   }
 
   function handleStraight(key: MoveKey, remain: number) {
+    setKeySoundPace("normal");
     if (held === key || held) return;
     if (timers.size > 0) return;
     if (remain <= 5) return;
@@ -166,7 +175,6 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
   }
 
   function onMove(dir: Direction, pulse: KeyPulse) {
-    setKeySoundPace(pulse.tickMs <= NITRO_TICK ? "fast" : "normal");
     const key = DIR_TO_KEY[dir];
     remainNow = pulse.remain;
     const turned = pulse.turn || lastDir !== dir;
@@ -202,6 +210,7 @@ export function createKeyActor(onHeld: (key: GameKey | null) => void) {
     runLen = 0;
     remainNow = 0;
     tappedThisRun = false;
+    lastPressAt = 0;
   }
 
   function dispose() {
