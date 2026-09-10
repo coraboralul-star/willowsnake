@@ -19,6 +19,7 @@ import {
   KEY_TO_DIR,
   REWIND_PLAY_MS,
   rewindTape,
+  shiftGameClock,
   startRun,
   step,
   type Direction,
@@ -234,10 +235,10 @@ export function useSnakeGame(
   const finishRewind = useCallback((now: number) => {
     const play = rewindRef.current;
     rewindRef.current = null;
-    const land = play?.frames.at(-1)?.state;
-    const landedAt = play?.frames.at(-1)?.at ?? now;
+    const land = play?.frames.at(-1);
+    const landedAt = land?.at ?? now;
     let next = land
-      ? cloneGame(land)
+      ? shiftGameClock(cloneGame(land.state), now - land.at)
       : liveRef.current;
     next.status = "playing";
     next.queued = [];
@@ -270,8 +271,9 @@ export function useSnakeGame(
       keysRef.current?.reset();
       const frames = rewindTape(historyRef.current, current, now);
       if (frames.length < 2) {
+        const snap = frames[0];
         liveRef.current = {
-          ...cloneGame(frames[0]?.state ?? current),
+          ...shiftGameClock(cloneGame(snap?.state ?? current), now - (snap?.at ?? now)),
           status: "playing",
           queued: [],
           tickStartedAt: now,
@@ -312,16 +314,20 @@ export function useSnakeGame(
         Math.floor(eased * (rewind.frames.length - 1)),
       );
       if (index !== rewind.shown) {
-        const from = liveRef.current.snake;
-        const frame = cloneGame(rewind.frames[index].state);
+        const snap = rewind.frames[index];
+        const frame = shiftGameClock(cloneGame(snap.state), now - snap.at);
         frame.status = "playing";
         frame.queued = [];
-        frame.prevSnake = from.map((part) => ({ ...part }));
-        frame.tickStartedAt = now;
+        frame.hijacked = false;
         frame.ateAt = 0;
         frame.bombHitAt = 0;
         frame.bombBurstAt = 0;
-        frame.hijacked = false;
+        if (rewind.shown >= 0 && index === rewind.shown + 1) {
+          frame.prevSnake = liveRef.current.snake.map((part) => ({ ...part }));
+          frame.tickStartedAt = now;
+        } else {
+          frame.tickStartedAt = now - frame.tickMs;
+        }
         frame.glowUntil = Math.max(frame.glowUntil, rewind.startedAt + rewind.duration + 800);
         liveRef.current = frame;
         rewind.shown = index;

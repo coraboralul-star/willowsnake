@@ -473,11 +473,14 @@ export type GameSnap = { at: number; state: GameState };
 export function rewindGame(history: GameSnap[], spawn: GameState, now: number): GameState {
   const target = now - REWIND_MS;
   let picked = spawn;
+  let pickedAt = history[0]?.at ?? 0;
   for (const snap of history) {
-    if (snap.at <= target) picked = snap.state;
-    else break;
+    if (snap.at <= target) {
+      picked = snap.state;
+      pickedAt = snap.at;
+    } else break;
   }
-  const restored = cloneGame(picked);
+  const restored = shiftGameClock(cloneGame(picked), now - pickedAt);
   restored.status = "playing";
   restored.queued = [];
   restored.tickStartedAt = now;
@@ -493,6 +496,31 @@ export function rewindTape(history: GameSnap[], live: GameState, now: number): G
     if (snap.at <= target) break;
   }
   return frames;
+}
+
+function stamp(time: number, delta: number) {
+  return time > 0 ? time + delta : 0;
+}
+
+export function shiftGameClock(state: GameState, delta: number): GameState {
+  if (!delta) return state;
+  return {
+    ...state,
+    tickStartedAt: stamp(state.tickStartedAt, delta),
+    ateAt: stamp(state.ateAt, delta),
+    foodAt: stamp(state.foodAt, delta),
+    bombHitAt: stamp(state.bombHitAt, delta),
+    bombBurstAt: stamp(state.bombBurstAt, delta),
+    glowUntil: stamp(state.glowUntil, delta),
+    nitroUntil: stamp(state.nitroUntil, delta),
+    slowUntil: stamp(state.slowUntil, delta),
+    hijackStartedAt: stamp(state.hijackStartedAt, delta),
+    hijackUntil: stamp(state.hijackUntil, delta),
+    bombs: state.bombs.map((bomb) => ({
+      ...bomb,
+      until: bomb.until > 0 ? bomb.until + delta : bomb.until,
+    })),
+  };
 }
 
 function emptyCells(state: GameState) {
